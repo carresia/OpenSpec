@@ -1,0 +1,93 @@
+name: pev
+version: 1
+description: PEV 全生命周期工作流 - prd → spec → catalog → specs → architecture → modules → tasks
+artifacts:
+  - id: prd
+    generates: prd.md
+    description: 产品需求文档（PEV product-manager 产出）
+    template: prd.md
+    requires: []
+    pev:
+      skill: product-manager
+      runDir: pm
+      output: pm/output/prd.md
+    promotes: prd.md
+
+  - id: spec
+    generates: spec.md
+    description: 工程规格（PEV requirement-clarify 产出，把 PRD 澄清为可落地的 Spec）
+    template: spec.md
+    requires:
+      - prd
+    pev:
+      skill: requirement-clarify
+      runDir: rc
+      output: rc/output/spec.md
+    promotes: spec.md
+
+  - id: catalog
+    generates: catalog.md
+    description: 行为目录（PEV behavior-decompose 产出，Story/验收标准/场景）
+    template: catalog.md
+    requires:
+      - spec
+    pev:
+      skill: behavior-decompose
+      runDir: decompose
+      output: decompose/output/catalog.md
+    promotes: catalog.md
+
+  - id: specs
+    generates: "specs/**/*.md"
+    description: OpenSpec delta specs（直写：把 catalog 映射为 Requirement/Scenario）
+    template: specs.md
+    instruction: |
+      把 catalog.md 里的 Story/验收标准/场景映射为 OpenSpec delta specs。
+      每个 capability 写一个 `specs/<capability-path>/spec.md`：
+      - 新增能力首节写 `## Purpose`（50+ 字符）；修改已有能力不要写 Purpose。
+      - 每个 `### Requirement:` 至少一个 `#### Scenario:`（WHEN/THEN）。
+      - 复用 openspec/specs/ 下已有路径，不要造近似重复的 capability。
+    requires:
+      - catalog
+
+  - id: design
+    generates: design/architecture.md
+    description: 架构设计（PEV architecture-design 产出）
+    template: design.md
+    requires:
+      - catalog
+    pev:
+      skill: architecture-design
+      runDir: arch
+      output: arch/output/architecture.md
+    promotes: design/architecture.md
+
+  - id: modules
+    generates: design/modules
+    description: 模块设计（PEV module-design 产出，每模块一个目录）
+    template: modules.md
+    requires:
+      - design
+    pev:
+      skill: module-design
+      runDir: module
+      output: module/output
+    promotes: design/modules
+
+  - id: tasks
+    generates: tasks.md
+    description: 实施任务清单（直写：planning-and-task-breakdown）
+    template: tasks.md
+    instruction: |
+      按 tasks.md 模板拆分实施任务：每个任务必须是 `- [ ] X.Y ...` 复选框，并在描述里写明验证方式。
+      apply 阶段会解析复选框跟踪进度。按依赖排序分组，测试与文档随各自分组落地，不单独收集到最后。
+    requires:
+      - specs
+      - modules
+
+apply:
+  requires: [tasks]
+  tracks: tasks.md
+  instruction: |
+    阅读上下文文件，按 tasks.md 逐个完成并勾选。实施采用增量式实现（incremental-implementation）
+    与测试驱动开发（test-driven-development）直写模式。遇到阻塞或需澄清时暂停。

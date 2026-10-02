@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-10-01
+goal: 在 OpenSpec 源码层原生支持 PEV 家族 skills 的调用、产物晋升与归档回溯

@@ -33,6 +33,17 @@ export const ArtifactSchema = z.object({
   template: relativePathSchema('template field'),
   instruction: z.string().optional(),
   requires: z.array(z.string()).default([]),
+  // PEV 后端绑定：声明该 artifact 由哪个 PEV skill 产出。存在时，完成判定走
+  // `.pev/<轮次>/<runDir>/state.json` 的 COMPLETE 状态，而非文件存在。
+  pev: z
+    .object({
+      skill: z.string().min(1, { error: 'pev.skill is required' }),
+      runDir: relativePathSchema('pev.runDir field'),
+      output: relativePathSchema('pev.output field'),
+    })
+    .optional(),
+  // 归档时晋升到 openspec/artifacts/ 的相对目标路径（非 spec 产物）。
+  promotes: relativePathSchema('promotes field').optional(),
 });
 
 // Apply phase configuration for schema-aware apply instructions

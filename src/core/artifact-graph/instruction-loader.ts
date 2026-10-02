@@ -8,6 +8,7 @@ import {
   resolveArtifactOutputPath,
   resolveArtifactOutputs,
 } from './outputs.js';
+import { collectCapabilityInventory, type CapabilityRef } from '../pev/capability-inventory.js';
 import {
   formatUnknownChangeMetadataKeysMessage,
   readChangeMetadata,
@@ -123,6 +124,16 @@ export interface ArtifactInstructions {
   warning?: string;
   /** Non-fatal metadata diagnostics */
   warnings?: string[];
+  /** PEV 后端路由信息（仅当 artifact 声明 pev 且 change 绑定轮次时存在） */
+  pev?: {
+    skill: string;
+    runDir: string;
+    output: string;
+    roundDir: string;
+    upstream?: Array<{ artifactId: string; source: string }>;
+  };
+  /** 既有能力清单（PRD 层 artifact 注入，US3） */
+  capabilityInventory?: CapabilityRef[];
 }
 
 /**
@@ -296,7 +307,11 @@ export function loadChangeContext(
 
   const schema = resolveSchema(resolvedSchemaName, projectRoot);
   const graph = ArtifactGraph.fromSchema(schema);
-  const completed = detectCompleted(graph, changeDir);
+  const completed = detectCompleted(graph, changeDir, {
+    roundDir: metadata?.pev_round
+      ? path.join(projectRoot, '.pev', metadata.pev_round)
+      : undefined,
+  });
 
   // A change that declares skip_specs has no spec deltas by design, so
   // artifacts generating into specs/ count as complete; otherwise the graph
@@ -401,6 +416,32 @@ export function generateInstructions(
       : undefined;
   const configRules = rulesForArtifact && rulesForArtifact.length > 0 ? rulesForArtifact : undefined;
 
+  // PEV 后端路由：告诉 agent 用哪个 skill、在哪一轮次的哪个子目录工作，以及
+  // 上游产物落在 `.pev/` 里的真实路径（引用不复制）。
+  const roundName = context.metadata?.pev_round;
+  const pev =
+    artifact.pev && roundName
+      ? {
+          skill: artifact.pev.skill,
+          runDir: artifact.pev.runDir,
+          output: artifact.pev.output,
+          roundDir: path.join(context.projectRoot, '.pev', roundName),
+          upstream: artifact.requires.map((id) => {
+            const dep = context.graph.getArtifact(id);
+            const source = dep?.pev?.output
+              ? path.join(context.projectRoot, '.pev', roundName, dep.pev.output)
+              : (dep?.generates ?? id);
+            return { artifactId: id, source };
+          }),
+        }
+      : undefined;
+
+  // US3：PRD 层 artifact 强制注入 openspec/specs/ 既有能力清单。
+  const isPrdArtifact = artifact.id === 'prd' || artifact.pev?.skill === 'product-manager';
+  const capabilityInventory = isPrdArtifact
+    ? collectCapabilityInventory(path.join(context.projectRoot, 'openspec', 'specs'))
+    : undefined;
+
   return {
     changeName: context.changeName,
     artifactId: artifact.id,
@@ -419,6 +460,8 @@ export function generateInstructions(
     ...(context.skippedArtifacts?.has(artifact.id)
       ? { skipped: true, warning: SKIP_SPECS_INSTRUCTIONS_WARNING }
       : {}),
+    ...(pev ? { pev } : {}),
+    ...(capabilityInventory ? { capabilityInventory } : {}),
     template: templateContent,
     dependencies,
     unlocks,

@@ -28,10 +28,13 @@ import { discoverSpecFiles, findUnreadDeltaFiles, hasAnyFileUnder } from '../uti
 import {
   METADATA_FILENAME,
   formatUnknownChangeMetadataKeysMessage,
+  readChangeMetadata,
   readRetireCapabilitiesMarker,
   readSkipSpecsMarker,
   readUnknownChangeMetadataKeys,
 } from '../utils/change-metadata.js';
+import { resolveSchema } from './artifact-graph/resolver.js';
+import { promotePevArtifacts, writePevLog } from './pev/promotion.js';
 import { confirmPrompt, isNonInteractivePromptError } from '../utils/interactive.js';
 import { FileSystemUtils } from '../utils/file-system.js';
 import { folderStyleNameProblem } from './id.js';
@@ -1668,6 +1671,41 @@ export class ArchiveCommand {
       let totals: ArchiveResult['totals'];
       const specWarnings: string[] = [];
       let changeArchived = false;
+
+      // PEV 后端：归档前把 `.pev/<轮次>/` 各阶段最终产物晋升进 change 目录（及
+      // openspec/artifacts/），并写 pev-log.md。必须在任何 moveDirectory 之前执行，
+      // 这样晋升产物才能随 change 一起归档。非 pev change 或缺失轮次时 no-op，
+      // 失败也不阻断归档（留痕告警即可）。
+      try {
+        const changeMetadata = readChangeMetadata(changeDir, root.path);
+        if (changeMetadata?.pev_round) {
+          const schema = resolveSchema(changeMetadata.schema, root.path);
+          const promotions = await promotePevArtifacts({
+            changeDir,
+            projectRoot: root.path,
+            roundName: changeMetadata.pev_round,
+            schema,
+            artifactsRoot: path.join(root.path, 'openspec', 'artifacts'),
+          });
+          if (promotions.length > 0) {
+            await writePevLog(changeDir, promotions);
+          }
+          for (const promotion of promotions) {
+            if (promotion.status === 'conflict') {
+              specWarnings.push(
+                `PEV 产物 '${promotion.artifactId}' 晋升冲突（目标已存在且内容不同）：${promotion.target}`
+              );
+            } else if (promotion.status === 'missing') {
+              specWarnings.push(
+                `PEV 产物 '${promotion.artifactId}' 缺失（.pev 未渲染 output），未晋升`
+              );
+            }
+          }
+        }
+      } catch {
+        // PEV 晋升失败不阻断归档；非 pev change 静默跳过。
+      }
+
       if (options.skipSpecs) {
       if (!json) {
         console.log('Skipping spec updates (--skip-specs flag provided).');

@@ -166,3 +166,6 @@ opencode.json
 
 # Cursor
 .cursor/
+
+# PEV 过程工作区（.pev/<轮次>/ 由 PEV 家族 skills 生成，归档晋升后不随仓库提交）
+.pev/

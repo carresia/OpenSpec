@@ -184,6 +184,23 @@ export async function createChange(
   await FileSystemUtils.createDirectory(changeDir);
   await FileSystemUtils.createDirectory(path.join(openspecDir, 'specs'));
   await FileSystemUtils.createDirectory(path.join(openspecDir, 'changes', 'archive'));
+
+  // PEV 后端：为含 pev artifact 的 schema 创建 `.pev/<轮次>/` 轮次目录。轮次名
+  // 与 change 一一对应，写入元数据供完成判定与归档晋升定位过程工作区。
+  let pevRound: string | undefined;
+  if (schema.artifacts.some((artifact) => artifact.pev)) {
+    const base = `prd-${formatLocalDate()}`;
+    let candidate = base;
+    let n = 2;
+    while (
+      await FileSystemUtils.directoryExists(path.join(projectRoot, '.pev', candidate))
+    ) {
+      candidate = `${base}-${n++}`;
+    }
+    pevRound = candidate;
+    await FileSystemUtils.createDirectory(path.join(projectRoot, '.pev', pevRound, 'pm'));
+  }
+
   const configPath = path.join(openspecDir, 'config.yaml');
   const configYmlPath = path.join(openspecDir, 'config.yml');
   if (
@@ -198,6 +215,7 @@ export async function createChange(
     schema: schemaName,
     created: formatLocalDate(),
     ...(skipsSpecs ? { skip_specs: true } : {}),
+    ...(pevRound ? { pev_round: pevRound } : {}),
     ...options.metadata,
   }, projectRoot);
 

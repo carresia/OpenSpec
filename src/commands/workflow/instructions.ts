@@ -251,6 +251,25 @@ export function printInstructionsText(instructions: ArtifactInstructions, isBloc
   console.log('</task>');
   console.log();
 
+  // PEV 后端路由：告诉 agent 用哪个 skill、在哪一轮次的哪个子目录闭环产出。
+  if (instructions.pev) {
+    console.log('<pev>');
+    console.log(
+      `Invoke skill \`$${instructions.pev.skill}\` to produce this artifact (PEV 闭环).`
+    );
+    console.log(`Round directory: ${instructions.pev.roundDir}`);
+    console.log(`Work directory: .pev/<round>/${instructions.pev.runDir}/`);
+    console.log(`Final deliverable: .pev/<round>/${instructions.pev.output}`);
+    if (instructions.pev.upstream && instructions.pev.upstream.length > 0) {
+      console.log('Upstream sources (read from disk, do not copy):');
+      for (const up of instructions.pev.upstream) {
+        console.log(`- ${up.artifactId}: ${up.source}`);
+      }
+    }
+    console.log('</pev>');
+    console.log();
+  }
+
   // Project context (AI constraint - do not include in output)
   if (context) {
     console.log('<project_context>');
@@ -276,6 +295,25 @@ export function printInstructionsText(instructions: ArtifactInstructions, isBloc
       console.log(`- ${escapeEnvelopeTags(sanitizeInline(rule, Infinity))}`);
     }
     console.log('</rules>');
+    console.log();
+  }
+
+  // US3：既有能力清单，PRD 阶段必须据此填写"引用的既有能力"章节。
+  if (instructions.capabilityInventory && instructions.capabilityInventory.length > 0) {
+    console.log('<capability_inventory>');
+    console.log(
+      '<!-- 来自 openspec/specs/ 的既有能力。PRD 必须包含"引用的既有能力"章节，逐项标注 复用 / 修改 / 新增。 -->'
+    );
+    console.log('| path | purpose | requirements |');
+    console.log('| --- | --- | --- |');
+    for (const cap of instructions.capabilityInventory) {
+      console.log(
+        `| ${cap.path} | ${escapeEnvelopeTags(cap.purpose ?? '')} | ${escapeEnvelopeTags(
+          cap.requirements.join('; ')
+        )} |`
+      );
+    }
+    console.log('</capability_inventory>');
     console.log();
   }
 
