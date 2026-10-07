@@ -23,35 +23,63 @@ describe('pev schema full chain (status → instructions → archive)', () => {
     return path.join(pevDir, dir.name);
   }
 
+  async function seedFileStage(
+    round: string,
+    runDir: string,
+    output: string,
+    content: string
+  ): Promise<void> {
+    await fs.mkdir(path.join(round, path.dirname(output)), { recursive: true });
+    await fs.writeFile(
+      path.join(round, runDir, 'state.json'),
+      JSON.stringify({ status: 'COMPLETE', iteration: 1 })
+    );
+    await fs.writeFile(path.join(round, output), content);
+  }
+
+  async function seedDirStage(
+    round: string,
+    runDir: string,
+    output: string,
+    entries: Record<string, string>
+  ): Promise<void> {
+    for (const [rel, content] of Object.entries(entries)) {
+      const target = path.join(round, output, rel);
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, content);
+    }
+    await fs.writeFile(
+      path.join(round, runDir, 'state.json'),
+      JSON.stringify({ status: 'COMPLETE', iteration: 1 })
+    );
+  }
+
   async function seedPevOutputs(): Promise<void> {
     const round = await roundDir();
     const changeDir = path.join(tempDir, 'openspec', 'changes', 'demo');
 
-    const stages: Array<{ runDir: string; output: string; content: string }> = [
-      { runDir: 'pm', output: 'pm/output/prd.md', content: '# PRD\n\nreal prd\n' },
-      { runDir: 'rc', output: 'rc/output/spec.md', content: '# Spec\n\nreal spec\n' },
-      { runDir: 'decompose', output: 'decompose/output/catalog.md', content: '# Catalog\n\nstories\n' },
-      { runDir: 'arch', output: 'arch/output/architecture.md', content: '# Architecture\n\narch\n' },
-    ];
-    for (let i = 0; i < stages.length; i++) {
-      const stage = stages[i];
-      await fs.mkdir(path.join(round, path.dirname(stage.output)), { recursive: true });
-      await fs.writeFile(
-        path.join(round, stage.runDir, 'state.json'),
-        JSON.stringify({ status: 'COMPLETE', iteration: i + 1 })
-      );
-      await fs.writeFile(path.join(round, stage.output), stage.content);
-    }
-
-    // module-design renders a directory output
-    await fs.mkdir(path.join(round, 'module', 'output', 'M1'), { recursive: true });
-    await fs.writeFile(
-      path.join(round, 'module', 'state.json'),
-      JSON.stringify({ status: 'COMPLETE', iteration: 2 })
+    await seedFileStage(round, 'pm', 'pm/output/prd.md', '# PRD\n\nreal prd\n');
+    await seedFileStage(round, 'rc', 'rc/output/spec.md', '# Spec\n\nreal spec\n');
+    await seedFileStage(round, 'decompose', 'decompose/output/catalog.md', '# Catalog\n\nstories\n');
+    await seedFileStage(round, 'arch', 'arch/output/architecture.md', '# Architecture\n\narch\n');
+    await seedDirStage(round, 'module', 'module/output', {
+      'M1/module-detail.md': '# M1\n\nmodule one\n',
+    });
+    await seedDirStage(round, 'api', 'api/output', {
+      'A1/api-contract.md': '# API\n\ncontract\n',
+    });
+    await seedDirStage(round, 'db', 'db/output', {
+      'D1/db-schema.md': '# DB\n\nschema\n',
+    });
+    await seedFileStage(round, 'tasks', 'tasks/output/task-plan.md', '# Task Plan\n\nplan\n');
+    await seedFileStage(
+      round,
+      'impl',
+      'impl/output/implementation-report.md',
+      '# Implementation Report\n\nreport\n'
     );
-    await fs.writeFile(path.join(round, 'module', 'output', 'M1', 'module-detail.md'), '# M1\n\nmodule one\n');
 
-    // direct-write delta spec + tasks
+    // direct-write delta spec
     await fs.mkdir(path.join(changeDir, 'specs', 'demo-capability'), { recursive: true });
     await fs.writeFile(
       path.join(changeDir, 'specs', 'demo-capability', 'spec.md'),
@@ -71,10 +99,6 @@ describe('pev schema full chain (status → instructions → archive)', () => {
         '- **THEN** archive 完成并生成 pev-log.md',
       ].join('\n')
     );
-    await fs.writeFile(
-      path.join(changeDir, 'tasks.md'),
-      '# Tasks\n\n## 1. 实施\n\n- [x] 1.1 完成实现并验证测试通过\n'
-    );
   }
 
   it('runs a pev change from creation through archive', async () => {
@@ -87,7 +111,7 @@ describe('pev schema full chain (status → instructions → archive)', () => {
     await fs.writeFile(path.join(tempDir, 'openspec', 'changes', 'demo', 'prd.md'), 'hand written');
     const before = await runCLI(['status', '--change', 'demo'], { cwd: tempDir });
     expect(before.exitCode).toBe(0);
-    expect(before.stdout).toContain('0/7 artifacts complete');
+    expect(before.stdout).toContain('0/10 artifacts complete');
 
     // instructions route the prd artifact to the product-manager skill
     const instr = await runCLI(['instructions', 'prd', '--change', 'demo'], { cwd: tempDir });
@@ -101,7 +125,7 @@ describe('pev schema full chain (status → instructions → archive)', () => {
 
     const done = await runCLI(['status', '--change', 'demo'], { cwd: tempDir });
     expect(done.exitCode).toBe(0);
-    expect(done.stdout).toContain('7/7 artifacts complete');
+    expect(done.stdout).toContain('10/10 artifacts complete');
 
     const archived = await runCLI(['archive', 'demo', '--yes'], { cwd: tempDir });
     expect(archived.exitCode).toBe(0);
@@ -115,6 +139,10 @@ describe('pev schema full chain (status → instructions → archive)', () => {
     const log = await fs.readFile(path.join(archivedRoot, 'pev-log.md'), 'utf8');
     expect(log).toContain('product-manager');
     expect(log).toContain('module-design');
+    expect(log).toContain('api-and-interface-design');
+    expect(log).toContain('database-schema-design');
+    expect(log).toContain('planning-and-task-breakdown');
+    expect(log).toContain('incremental-implementation');
     expect(log).toContain('promoted');
 
     // single-file and directory outputs were promoted into openspec/artifacts/
@@ -123,6 +151,16 @@ describe('pev schema full chain (status → instructions → archive)', () => {
     expect(
       (await fs.readFile(path.join(artifacts, 'design', 'modules', 'M1', 'module-detail.md'), 'utf8')).trim()
     ).toBe('# M1\n\nmodule one');
+    expect(
+      (await fs.readFile(path.join(artifacts, 'design', 'api', 'A1', 'api-contract.md'), 'utf8')).trim()
+    ).toBe('# API\n\ncontract');
+    expect(
+      (await fs.readFile(path.join(artifacts, 'design', 'db', 'D1', 'db-schema.md'), 'utf8')).trim()
+    ).toBe('# DB\n\nschema');
+    expect((await fs.readFile(path.join(artifacts, 'task-plan.md'), 'utf8')).trim()).toBe('# Task Plan\n\nplan');
+    expect(
+      (await fs.readFile(path.join(artifacts, 'implementation-report.md'), 'utf8')).trim()
+    ).toBe('# Implementation Report\n\nreport');
 
     // delta spec merged into the main specs tree
     const merged = await fs.readFile(

@@ -1,6 +1,6 @@
 name: pev
 version: 1
-description: PEV 全生命周期工作流 - prd → spec → catalog → specs → architecture → modules → tasks
+description: PEV 全生命周期工作流 - prd → spec → catalog → specs → design → modules → api → db → tasks → implement
 artifacts:
   - id: prd
     generates: prd.md
@@ -74,20 +74,52 @@ artifacts:
       output: module/output
     promotes: design/modules
 
-  - id: tasks
-    generates: tasks.md
-    description: 实施任务清单（直写：planning-and-task-breakdown）
-    template: tasks.md
-    instruction: |
-      按 tasks.md 模板拆分实施任务：每个任务必须是 `- [ ] X.Y ...` 复选框，并在描述里写明验证方式。
-      apply 阶段会解析复选框跟踪进度。按依赖排序分组，测试与文档随各自分组落地，不单独收集到最后。
+  - id: design-api
+    generates: design/api
+    description: 接口契约（PEV api-and-interface-design 产出，每契约面一个目录）
+    template: design-api.md
     requires:
-      - specs
       - modules
+    pev:
+      skill: api-and-interface-design
+      runDir: api
+      output: api/output
+    promotes: design/api
 
-apply:
-  requires: [tasks]
-  tracks: tasks.md
-  instruction: |
-    阅读上下文文件，按 tasks.md 逐个完成并勾选。实施采用增量式实现（incremental-implementation）
-    与测试驱动开发（test-driven-development）直写模式。遇到阻塞或需澄清时暂停。
+  - id: design-db
+    generates: design/db
+    description: 数据库 schema（PEV database-schema-design 产出，每库一个目录）
+    template: design-db.md
+    requires:
+      - modules
+    pev:
+      skill: database-schema-design
+      runDir: db
+      output: db/output
+    promotes: design/db
+
+  - id: tasks
+    generates: task-plan.md
+    description: 实施任务清单（PEV planning-and-task-breakdown 产出）
+    template: task-plan.md
+    requires:
+      - design-api
+      - design-db
+      - modules
+    pev:
+      skill: planning-and-task-breakdown
+      runDir: tasks
+      output: tasks/output/task-plan.md
+    promotes: task-plan.md
+
+  - id: implement
+    generates: implementation-report.md
+    description: 实施报告（PEV incremental-implementation 产出）
+    template: implementation-report.md
+    requires:
+      - tasks
+    pev:
+      skill: incremental-implementation
+      runDir: impl
+      output: impl/output/implementation-report.md
+    promotes: implementation-report.md
