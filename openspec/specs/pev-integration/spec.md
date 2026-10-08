@@ -19,20 +19,6 @@
 - **WHEN** 该 artifact 的 `state.status === "COMPLETE"` 且 `output/` 交付物存在
 - **THEN** `openspec status` 将该 artifact 报告为 done，并解锁其下游 artifact
 
-### Requirement: PEV 产物晋升入变更目录
-
-归档时，OpenSpec SHALL 把 `.pev/<轮次>/<runDir>/output/` 的最终交付物晋升到 change 目录中 `generates` 声明的路径；若 artifact 声明了 `promotes`，还应晋升到 `openspec/artifacts/` 对应路径。
-
-#### Scenario: 产物晋升到 change 目录
-
-- **WHEN** 执行 `openspec archive <change>`，且该 change 绑定了一个 PEV 轮次目录
-- **THEN** 各 PEV artifact 的 `output/` 交付物被复制到 change 目录对应路径，`pev-log.md` 记录阶段、轮次、迭代与 verdict
-
-#### Scenario: 缺失产物不阻断但需显式记录
-
-- **WHEN** 某 PEV artifact 的 `output/` 交付物不存在
-- **THEN** 晋升结果将该 artifact 记为 `missing`，归档不因此静默成功，留痕中可见
-
 ### Requirement: 发起需求时绑定 PEV 轮次
 
 当使用的 schema 含 `pev` 绑定 artifact 时，创建 change SHALL 同时创建 `.pev/<轮次>/` 轮次目录，并把轮次名写入该 change 的 `.openspec.yaml` 的 `pev_round` 字段。
@@ -59,3 +45,17 @@ OpenSpec SHALL 通过扫描 `~/skills/` 与 `~/.claude/skills/` 发现带 `.pev`
 
 - **WHEN** 运行 PEV skill 发现逻辑
 - **THEN** 返回 `product-manager`、`requirement-clarify`、`behavior-decompose`、`architecture-design`、`module-design` 等 skill 名
+
+### Requirement: PEV 产物仅在验证通过后晋升
+
+归档时，OpenSpec SHALL 把 `.pev/<轮次>/<runDir>/output/` 的最终交付物晋升到 change 目录中 `generates` 声明的路径；若 artifact 声明了 `promotes`，还应晋升到 `openspec/artifacts/` 对应路径。晋升以该工件通过验证（state.json `status === "COMPLETE"`）为前提；未验证、缺失或冲突的工件不复制任何文件，并使归档整体拒绝。
+
+#### Scenario: 验证通过的产物晋升到 change 目录
+
+- **WHEN** 执行 `openspec archive <change>`，该 change 绑定了一个 PEV 轮次目录，且工件 state.json 为 `COMPLETE`
+- **THEN** 该工件的 `output/` 交付物被复制到 change 目录对应路径，`pev-log.md` 记录阶段、轮次、迭代与 verdict
+
+#### Scenario: 未验证或缺失产物阻断归档
+
+- **WHEN** 某 PEV artifact 的 state.json 缺失或非 `COMPLETE`（记 `unverified`），或其 `output/` 交付物不存在（记 `missing`），或晋升目标与 output 内容不一致（记 `conflict`）
+- **THEN** 该工件不被复制，归档拒绝执行，留痕表格中可见各工件状态

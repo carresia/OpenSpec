@@ -1,0 +1,93 @@
+# pev-verification-gates Specification
+
+## Purpose
+
+未 COMPLETE 的 PEV 工件在 OpenSpec 的每个消费点被视为不存在：instructions 不为其下发后续指令、validate 不给绿灯、promotion 不晋升、archive 不放行。配套地，PEV 技能缺失在本机可被当场发现，而不是中途被门禁卡死仍不知原因。
+
+## ADDED Requirements
+
+### Requirement: instructions 拒绝下发 blocked 工件
+
+当请求的 artifact 在 workflow graph 中存在未完成的前置（直接或传递），`openspec instructions <artifact>` SHALL 以非零退出拒绝下发，并在错误信息中列出每个未完成前置及其完成信号路径。对 PEV 绑定工件，完成信号路径为 `.pev/<轮次>/<runDir>/state.json`；对直写工件为 `generates` 声明的文件。
+
+#### Scenario: 前置 PEV 工件未 COMPLETE 时拒绝
+
+- **WHEN** artifact `spec` 声明 `requires: [prd]`，且 `prd` 绑定的 `.pev/<轮次>/pm/state.json` 不存在或 `status` 不是 `COMPLETE`
+- **THEN** `openspec instructions spec` 以非零退出，错误信息指明 `prd` 未完成及其 state.json 路径
+- **AND** 不输出任何针对 `spec` 的指令内容
+
+#### Scenario: 全部前置完成后正常下发
+
+- **WHEN** 请求的 artifact 的全部前置（含传递前置）均已完成
+- **THEN** instructions 正常返回该 artifact 的指令内容，退出码为零
+
+#### Scenario: 无前置的首个工件不受影响
+
+- **WHEN** 请求的 artifact 不声明任何 `requires`
+- **THEN** instructions 行为与现状一致，不引入额外检查
+
+### Requirement: strict 校验将未验证 PEV 工件判为 invalid
+
+对使用含 `pev` 绑定工件 schema 的 change，`openspec validate <change> --strict` SHALL 检查每个 `pev` 绑定工件达到 COMPLETE（state.json `status === "COMPLETE"` 且 output 交付物存在），任一未达标即判 invalid，并逐工件输出错误。不带 `--strict` 时，对未达标工件输出 warning，不改变判定结果。
+
+#### Scenario: 手写产物无 state.json 时 strict 判 invalid
+
+- **WHEN** 某 `pev` 绑定工件的 `.pev/<轮次>/<runDir>/state.json` 不存在，即使 change 目录下已存在其 `generates` 文件
+- **THEN** `validate --strict` 判 invalid，错误信息命名该工件与其 runDir
+
+#### Scenario: 非 strict 模式给 warning 不判 invalid
+
+- **WHEN** 同样缺失 state.json 的 change 以不带 `--strict` 的 validate 检查
+- **THEN** 输出对每个未 COMPLETE 工件的 warning 行，判定结果不受 provenance 影响
+
+#### Scenario: 技能链产出正常通过
+
+- **WHEN** 全部 `pev` 绑定工件的 state.json 均为 `COMPLETE` 且 output 存在
+- **THEN** `validate --strict` 的 provenance 检查通过，结构检查结论不变
+
+### Requirement: 未验证产物不晋升
+
+归档晋升时，对 state.json 缺失或 `status` 非 `COMPLETE` 的 PEV 工件，晋升 SHALL 返回 `unverified` 且不复制任何文件；`missing`（output 不存在）与 `conflict`（目标内容与 output 不一致）同样不复制。
+
+#### Scenario: 无 state.json 的产物被拒绝晋升
+
+- **WHEN** 某工件的 `output/` 交付物存在但对应 state.json 不存在或非 `COMPLETE`
+- **THEN** 该工件晋升结果为 `unverified`，change 目录与其 `promotes` 目标均不被写入
+
+#### Scenario: 冲突产物不被覆盖
+
+- **WHEN** 晋升目标已存在且内容与 output 不一致
+- **THEN** 晋升结果为 `conflict`，目标内容保持不变
+
+### Requirement: 归档拒绝未通过晋升的 change
+
+`openspec archive <change>` SHALL 在任一 PEV 工件晋升结果不是 `promoted`（即 `missing`、`unverified` 或 `conflict`）时拒绝归档，错误信息包含各工件的晋升结果表格，且不移动 change 目录。
+
+#### Scenario: 存在 unverified 晋升结果时归档中止
+
+- **WHEN** change 绑定 PEV 轮次且至少一个工件晋升结果为 `unverified`
+- **THEN** archive 以非零退出，输出含各工件状态的表格，change 目录留在原地
+
+#### Scenario: 全部晋升通过后归档照常
+
+- **WHEN** 全部 PEV 工件晋升结果均为 `promoted`
+- **THEN** archive 按既有流程继续（spec 合并、移动到 archive、写 pev-log）
+
+### Requirement: PEV 技能缺失可检测
+
+`openspec doctor` SHALL 列出本机发现的 PEV 技能清单；`openspec new change` 使用含 `pev` 绑定的 schema、以及 instructions 下发 `pev` 绑定工件指令时，SHALL 在对应技能未安装于本机时输出警告，指明缺失的技能名与安装位置约定（`~/skills/` 或 `~/.claude/skills/`）。
+
+#### Scenario: doctor 列出已安装技能
+
+- **WHEN** 运行 `openspec doctor`
+- **THEN** 输出包含 PEV 技能发现段，列出扫描到的技能名
+
+#### Scenario: 创建 pev change 时技能缺失警告
+
+- **WHEN** `openspec new change <name>` 的 schema 声明了 `pev` 绑定，且其声明的技能均不在本机技能目录
+- **THEN** change 创建照常完成，并输出缺失技能警告
+
+#### Scenario: 下发 pev 工件指令时技能缺失警告
+
+- **WHEN** instructions 下发某个 `pev` 绑定工件的指令，且该工件声明的技能不在本机
+- **THEN** 指令内容附带缺失技能警告，指明技能名与安装位置

@@ -2,7 +2,9 @@
 
 ## Purpose
 Define artifact workflow CLI behavior (`status`, `instructions`, `templates`, and setup flows) for scaffolded and active changes.
+
 ## Requirements
+
 ### Requirement: Status Command
 
 The system SHALL display artifact completion status for a change, including scaffolded (empty) changes.
@@ -83,7 +85,7 @@ The workflow SHALL use `openspec status` output to determine what can be created
 
 ### Requirement: Instructions Command
 
-The system SHALL output enriched instructions for creating an artifact, including for scaffolded changes.
+The system SHALL output enriched instructions for creating an artifact, including for scaffolded changes. When the requested artifact is blocked by incomplete prerequisites (direct or transitive), the command SHALL refuse with a non-zero exit and name each incomplete prerequisite with its completion-signal path instead of outputting instructions.
 
 #### Scenario: Show enriched instructions
 
@@ -107,7 +109,8 @@ The system SHALL output enriched instructions for creating an artifact, includin
 #### Scenario: Artifact with unmet dependencies
 
 - **WHEN** user requests instructions for a blocked artifact
-- **THEN** the system displays instructions with a warning about missing dependencies
+- **THEN** the system exits non-zero without artifact instructions
+- **AND** the error names each incomplete prerequisite and its completion-signal path (for PEV-bound artifacts, the `.pev/<round>/<runDir>/state.json` path; for direct-write artifacts, the `generates` path)
 
 #### Scenario: Instructions on scaffolded change
 
