@@ -27,6 +27,9 @@ import {
   countEmptyScenarios,
 } from '../parsers/requirement-text.js';
 import { findMainSpecStructureIssues } from '../parsers/spec-structure.js';
+import { readChangeMetadata } from '../../utils/change-metadata.js';
+import { resolveSchema } from '../artifact-graph/resolver.js';
+import { isPevStageComplete, resolveRoundDir } from '../pev/state.js';
 import { FileSystemUtils } from '../../utils/file-system.js';
 import { discoverSpecFiles, findUnreadDeltaFiles, hasAnyFileUnder } from '../../utils/spec-discovery.js';
 import {
@@ -173,6 +176,35 @@ export class Validator {
     let hasRootLevelSpec = false;
     const missingHeaderSpecs: string[] = [];
     const emptySectionSpecs: Array<{ path: string; sections: string[] }> = [];
+
+    // PEV provenance gate (pev-verification-gates): a PEV-bound artifact only
+    // counts once its skill's state machine reached COMPLETE. Hand-written
+    // files in the change directory or a bare output/ never flip the verdict.
+    // Strict mode treats an unverified artifact as an error; the default run
+    // keeps it a warning so the structural verdict is unchanged.
+    try {
+      // changeDir is <root>/openspec/changes/<name>: three levels up to root.
+      const projectRoot = options.projectRoot ?? path.resolve(changeDir, '..', '..', '..');
+      const changeMetadata = readChangeMetadata(changeDir, projectRoot);
+      if (changeMetadata?.pev_round) {
+        const schema = resolveSchema(changeMetadata.schema, projectRoot);
+        const roundDir = resolveRoundDir(projectRoot, changeMetadata.pev_round);
+        for (const artifact of schema.artifacts) {
+          if (!artifact.pev) continue;
+          if (isPevStageComplete(roundDir, artifact.pev.runDir, artifact.pev.output)) continue;
+          issues.push({
+            level: this.strictMode ? 'ERROR' : 'WARNING',
+            path: FileSystemUtils.toPosixPath(
+              path.join('.pev', changeMetadata.pev_round, artifact.pev.runDir, 'state.json')
+            ),
+            message: `PEV artifact '${artifact.id}' is not verified: run the '${artifact.pev.skill}' skill until ${path.join('.pev', changeMetadata.pev_round, artifact.pev.runDir, 'state.json')} reaches status=COMPLETE. A hand-written ${artifact.generates} does not count.`,
+          });
+        }
+      }
+    } catch {
+      // Unreadable metadata or unresolvable schema: the delta checks below and
+      // the consuming commands report those concretely; do not double-report.
+    }
 
     try {
       // Discover delta specs through the same helper the change parser, show,

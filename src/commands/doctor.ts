@@ -26,6 +26,7 @@ import {
 import { COMMAND_REGISTRY } from '../core/completions/command-registry.js';
 import { COMMON_FLAGS } from '../core/completions/shared-flags.js';
 import { emitFailure, printJson } from './shared-output.js';
+import { discoverPevSkills } from '../core/pev/skill-registry.js';
 import * as path from 'node:path';
 
 const FAILURE_PAYLOAD = { root: null, store: null, references: [] };
@@ -173,6 +174,20 @@ function printHumanHealth(health: RelationshipHealth, declaredReferenceCount: nu
     (entry) => entry.store_id
   );
 
+  // pev-verification-gates: skill availability is a machine-local fact. A
+  // missing PEV skill cannot be detected from the repo, so doctor is where a
+  // dead delegation link becomes visible before it blocks mid-chain.
+  console.log('');
+  console.log('PEV Skills');
+  const pevSkills = discoverPevSkills();
+  if (pevSkills.length === 0) {
+    console.log('  (none discovered)');
+  } else {
+    for (const skill of pevSkills) {
+      console.log(`  - ${skill.name}`);
+    }
+  }
+
   for (const entry of health.status) {
     console.log('');
     console.log(`Note: ${entry.message}`);
@@ -208,7 +223,7 @@ export function registerDoctorCommand(program: Command): void {
         const { health, declaredReferenceCount } = await gatherHealth(root);
 
         if (options.json) {
-          printJson(health);
+          printJson({ ...health, pevSkills: discoverPevSkills().map((skill) => skill.name) });
           return;
         }
         printHumanHealth(health, declaredReferenceCount);

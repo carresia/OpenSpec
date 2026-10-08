@@ -157,6 +157,144 @@ describe('pev integration', () => {
         )
       ).toBe('M1 detail');
     });
+
+    it('refuses to promote when output exists but state.json is missing (hand-written bypass)', async () => {
+      // The 2026-10-08 forensic shape: output/ has files, no state.json at all.
+      const roundDir = path.join(tempDir, '.pev', 'prd-2026-10-08');
+      fs.mkdirSync(path.join(roundDir, 'pm', 'output'), { recursive: true });
+      fs.writeFileSync(path.join(roundDir, 'pm', 'output', 'prd.md'), 'hand-written PRD');
+      const changeDir = path.join(tempDir, 'change');
+      fs.mkdirSync(changeDir, { recursive: true });
+      const schema = createSchema([
+        {
+          id: 'prd',
+          generates: 'prd.md',
+          description: 'PRD',
+          template: 'prd.md',
+          requires: [],
+          pev: { skill: 'product-manager', runDir: 'pm', output: 'pm/output/prd.md' },
+          promotes: 'prd.md',
+        },
+      ]);
+
+      const results = await promotePevArtifacts({
+        changeDir,
+        projectRoot: tempDir,
+        roundName: 'prd-2026-10-08',
+        schema,
+        artifactsRoot: path.join(tempDir, 'openspec', 'artifacts'),
+      });
+
+      expect(results[0].status).toBe('unverified');
+      expect(fs.existsSync(path.join(changeDir, 'prd.md'))).toBe(false);
+      expect(
+        fs.existsSync(path.join(tempDir, 'openspec', 'artifacts', 'prd.md'))
+      ).toBe(false);
+
+      await writePevLog(changeDir, results);
+      expect(fs.readFileSync(path.join(changeDir, 'pev-log.md'), 'utf8')).toContain(
+        'unverified'
+      );
+    });
+
+    it('refuses to promote when state.json is not COMPLETE', async () => {
+      const roundDir = path.join(tempDir, '.pev', 'prd-2026-10-08');
+      fs.mkdirSync(path.join(roundDir, 'pm', 'output'), { recursive: true });
+      fs.writeFileSync(
+        path.join(roundDir, 'pm', 'state.json'),
+        JSON.stringify({ status: 'VERIFYING', iteration: 1 })
+      );
+      fs.writeFileSync(path.join(roundDir, 'pm', 'output', 'prd.md'), 'draft PRD');
+      const changeDir = path.join(tempDir, 'change');
+      fs.mkdirSync(changeDir, { recursive: true });
+      const schema = createSchema([
+        {
+          id: 'prd',
+          generates: 'prd.md',
+          description: 'PRD',
+          template: 'prd.md',
+          requires: [],
+          pev: { skill: 'product-manager', runDir: 'pm', output: 'pm/output/prd.md' },
+        },
+      ]);
+
+      const results = await promotePevArtifacts({
+        changeDir,
+        projectRoot: tempDir,
+        roundName: 'prd-2026-10-08',
+        schema,
+        artifactsRoot: path.join(tempDir, 'openspec', 'artifacts'),
+      });
+
+      expect(results[0].status).toBe('unverified');
+      expect(fs.existsSync(path.join(changeDir, 'prd.md'))).toBe(false);
+    });
+
+    it('reports missing without copying when state is COMPLETE but output is absent', async () => {
+      const roundDir = path.join(tempDir, '.pev', 'prd-2026-10-01');
+      fs.mkdirSync(path.join(roundDir, 'pm'), { recursive: true });
+      fs.writeFileSync(
+        path.join(roundDir, 'pm', 'state.json'),
+        JSON.stringify({ status: 'COMPLETE', iteration: 1 })
+      );
+      const changeDir = path.join(tempDir, 'change');
+      fs.mkdirSync(changeDir, { recursive: true });
+      const schema = createSchema([
+        {
+          id: 'prd',
+          generates: 'prd.md',
+          description: 'PRD',
+          template: 'prd.md',
+          requires: [],
+          pev: { skill: 'product-manager', runDir: 'pm', output: 'pm/output/prd.md' },
+        },
+      ]);
+
+      const results = await promotePevArtifacts({
+        changeDir,
+        projectRoot: tempDir,
+        roundName: 'prd-2026-10-01',
+        schema,
+        artifactsRoot: path.join(tempDir, 'openspec', 'artifacts'),
+      });
+
+      expect(results[0].status).toBe('missing');
+      expect(fs.existsSync(path.join(changeDir, 'prd.md'))).toBe(false);
+    });
+
+    it('reports conflict without overwriting a differing target', async () => {
+      const roundDir = path.join(tempDir, '.pev', 'prd-2026-10-01');
+      fs.mkdirSync(path.join(roundDir, 'pm', 'output'), { recursive: true });
+      fs.writeFileSync(
+        path.join(roundDir, 'pm', 'state.json'),
+        JSON.stringify({ status: 'COMPLETE', iteration: 1 })
+      );
+      fs.writeFileSync(path.join(roundDir, 'pm', 'output', 'prd.md'), 'skill-rendered PRD');
+      const changeDir = path.join(tempDir, 'change');
+      fs.mkdirSync(changeDir, { recursive: true });
+      fs.writeFileSync(path.join(changeDir, 'prd.md'), 'hand-edited PRD');
+      const schema = createSchema([
+        {
+          id: 'prd',
+          generates: 'prd.md',
+          description: 'PRD',
+          template: 'prd.md',
+          requires: [],
+          pev: { skill: 'product-manager', runDir: 'pm', output: 'pm/output/prd.md' },
+        },
+      ]);
+
+      const results = await promotePevArtifacts({
+        changeDir,
+        projectRoot: tempDir,
+        roundName: 'prd-2026-10-01',
+        schema,
+        artifactsRoot: path.join(tempDir, 'openspec', 'artifacts'),
+      });
+
+      expect(results[0].status).toBe('conflict');
+      expect(fs.readFileSync(path.join(changeDir, 'prd.md'), 'utf8')).toBe('hand-edited PRD');
+    });
   });
 
   describe('collectCapabilityInventory', () => {

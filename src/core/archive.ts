@@ -34,7 +34,7 @@ import {
   readUnknownChangeMetadataKeys,
 } from '../utils/change-metadata.js';
 import { resolveSchema } from './artifact-graph/resolver.js';
-import { promotePevArtifacts, writePevLog } from './pev/promotion.js';
+import { formatPevLogTable, promotePevArtifacts, writePevLog } from './pev/promotion.js';
 import { confirmPrompt, isNonInteractivePromptError } from '../utils/interactive.js';
 import { FileSystemUtils } from '../utils/file-system.js';
 import { folderStyleNameProblem } from './id.js';
@@ -1660,6 +1660,43 @@ export class ArchiveCommand {
       ? await fingerprintPortableContent(path.join(changeDir, METADATA_FILENAME))
       : undefined;
 
+    // PEV 验证门禁（pev-verification-gates）：把 `.pev/<轮次>/` 各阶段已验证产物
+    // 晋升进 change 目录（及 openspec/artifacts/）并写 pev-log.md。任一工件晋升
+    // 结果不是 promoted（unverified/missing/conflict）即拒绝归档——未验证内容
+    // 不得混入 archive。放在任何文件系统变更（含归档目录占用）之前，拒绝时
+    // change 原地不动。元数据不可解析时无法判断是否 pev change，沿用旧行为交给
+    // 归档其余环节处理；非 pev change 或缺失轮次时 no-op。
+    let pevRound: string | undefined;
+    let pevSchemaName = '';
+    try {
+      const changeMetadata = readChangeMetadata(changeDir, root.path);
+      pevRound = changeMetadata?.pev_round;
+      if (changeMetadata) pevSchemaName = changeMetadata.schema;
+    } catch {
+      // 非法元数据由 retirement-marker / spec 合并等后续环节报错。
+    }
+    if (pevRound) {
+      const schema = resolveSchema(pevSchemaName, root.path);
+      const promotions = await promotePevArtifacts({
+        changeDir,
+        projectRoot: root.path,
+        roundName: pevRound,
+        schema,
+        artifactsRoot: path.join(root.path, 'openspec', 'artifacts'),
+      });
+      if (promotions.length > 0) {
+        await writePevLog(changeDir, promotions);
+      }
+      const refused = promotions.filter((promotion) => promotion.status !== 'promoted');
+      if (refused.length > 0) {
+        throw new ArchiveBlockedError(
+          'archive_pev_unverified',
+          `PEV promotion refused for change '${describeChangeName(changeName!)}' - ${refused.length} artifact(s) not verified:\n\n${formatPevLogTable(promotions)}`,
+          `每个 PEV 工件需要 state.json status=COMPLETE 且 output 已渲染。用 openspec status --change ${changeName!} 查看缺口阶段，运行对应 PEV skill 至 COMPLETE 后重试归档`
+        );
+      }
+    }
+
     await assertArchiveDestinationAvailable(archivePath, archiveName);
     await fs.mkdir(archiveDir, { recursive: true });
     const claimPath = archiveClaimPath(archivePath, archiveName);
@@ -1671,40 +1708,6 @@ export class ArchiveCommand {
       let totals: ArchiveResult['totals'];
       const specWarnings: string[] = [];
       let changeArchived = false;
-
-      // PEV 后端：归档前把 `.pev/<轮次>/` 各阶段最终产物晋升进 change 目录（及
-      // openspec/artifacts/），并写 pev-log.md。必须在任何 moveDirectory 之前执行，
-      // 这样晋升产物才能随 change 一起归档。非 pev change 或缺失轮次时 no-op，
-      // 失败也不阻断归档（留痕告警即可）。
-      try {
-        const changeMetadata = readChangeMetadata(changeDir, root.path);
-        if (changeMetadata?.pev_round) {
-          const schema = resolveSchema(changeMetadata.schema, root.path);
-          const promotions = await promotePevArtifacts({
-            changeDir,
-            projectRoot: root.path,
-            roundName: changeMetadata.pev_round,
-            schema,
-            artifactsRoot: path.join(root.path, 'openspec', 'artifacts'),
-          });
-          if (promotions.length > 0) {
-            await writePevLog(changeDir, promotions);
-          }
-          for (const promotion of promotions) {
-            if (promotion.status === 'conflict') {
-              specWarnings.push(
-                `PEV 产物 '${promotion.artifactId}' 晋升冲突（目标已存在且内容不同）：${promotion.target}`
-              );
-            } else if (promotion.status === 'missing') {
-              specWarnings.push(
-                `PEV 产物 '${promotion.artifactId}' 缺失（.pev 未渲染 output），未晋升`
-              );
-            }
-          }
-        }
-      } catch {
-        // PEV 晋升失败不阻断归档；非 pev change 静默跳过。
-      }
 
       if (options.skipSpecs) {
       if (!json) {

@@ -46,6 +46,13 @@ In both branches, never create the root as a side effect: do not run `openspec i
    - `planningHome`, `changeRoot`, and `actionContext`: planning scope and edit constraints
    - Which artifact contains the tasks (typically "tasks" for spec-driven, check status for others)
 
+   **Hard precondition — stop before implementing if any prerequisite artifact is incomplete.**
+   If the status shows any artifact as incomplete (especially PEV-bound artifacts whose
+   completion requires `.pev/<round>/<runDir>/state.json` with `status: "COMPLETE"`),
+   do not start or continue implementing tasks. Report which artifacts are incomplete and
+   stop. A file in the change directory is not completion for a PEV-bound artifact: only
+   the skill-produced state.json counts, and hand-written artifacts do not unlock apply.
+
 3. **Get apply instructions**
 
    ```bash
@@ -181,6 +188,7 @@ What would you like to do?
 **Guardrails**
 - Keep going through tasks until done or blocked
 - Always read context files before starting (from the apply instructions output)
+- Stop before implementing when any prerequisite artifact is incomplete; a PEV-bound artifact is complete only when its state.json says COMPLETE - never treat a hand-written file as completion
 - If task is ambiguous, pause and ask before implementing
 - If implementation reveals issues, pause and suggest artifact updates
 - Keep code changes minimal and scoped to each task

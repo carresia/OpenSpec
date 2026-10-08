@@ -599,10 +599,14 @@ rules:
         status: 'done',
         requires: ['brief'],
       });
-      const missingInputInstructions = await readJson(['instructions', 'assessments']);
-      expect(missingInputInstructions.dependencies).toMatchObject([
-        { id: 'brief', done: false, path: 'brief.md' },
-      ]);
+      // With its dependency's file gone, instructions for assessments are
+      // refused (pev-verification-gates): the refusal names the prerequisite.
+      const refused = await runCLI(['instructions', 'assessments', '--change', changeName, '--json'], {
+        cwd: tempDir,
+      });
+      expect(refused.exitCode).toBe(1);
+      const refusedOutput = `${refused.stdout}\n${refused.stderr}`;
+      expect(refusedOutput).toContain('brief');
     });
 
     it('shows instructions for proposal on scaffolded change', async () => {
@@ -631,16 +635,20 @@ rules:
       expect(result.stdout).toContain('<template>');
     });
 
-    it('shows blocked warning for artifact with unmet dependencies', async () => {
+    it('refuses instructions for artifact with unmet dependencies', async () => {
       // tasks depends on design and specs, which are not done yet
       await createTestChange('blocked-change');
 
       const result = await runCLI(['instructions', 'tasks', '--change', 'blocked-change'], {
         cwd: tempDir,
       });
-      expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain('<warning>');
-      expect(result.stdout).toContain('status="missing"');
+      expect(result.exitCode).toBe(1);
+      const output = getOutput(result);
+      expect(output).toContain('blocked by incomplete prerequisite');
+      expect(output).toContain('design');
+      expect(output).toContain('specs');
+      // no artifact instructions are delivered alongside the refusal
+      expect(output).not.toContain('<artifact id="tasks"');
     });
 
     it('outputs JSON for instructions', async () => {

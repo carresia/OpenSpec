@@ -142,6 +142,38 @@ describe('openspec doctor (3.6)', () => {
     expect(parseJson(json).references).toEqual([]);
   });
 
+  it('lists discovered PEV skills and reports when none are installed', async () => {
+    // an isolated HOME carrying one fake PEV skill (SKILL.md + validate.py)
+    const home = mkdir('skills-home');
+    const fakeSkill = path.join(home, 'skills', 'fake-pev-skill');
+    fs.mkdirSync(path.join(fakeSkill, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(fakeSkill, 'SKILL.md'), '---\nname: fake-pev-skill\n---\n');
+    fs.writeFileSync(path.join(fakeSkill, 'scripts', 'validate.py'), '#!/usr/bin/env python3\n');
+
+    const found = await runCLI(['doctor', '--store', 'team-context'], {
+      cwd: tempDir,
+      env: { ...env, HOME: home },
+    });
+    expect(found.exitCode).toBe(0);
+    expect(found.stdout).toContain('PEV Skills');
+    expect(found.stdout).toContain('fake-pev-skill');
+
+    const json = await runCLI(['doctor', '--json', '--store', 'team-context'], {
+      cwd: tempDir,
+      env: { ...env, HOME: home },
+    });
+    expect(parseJson(json).pevSkills).toContain('fake-pev-skill');
+
+    const emptyHome = mkdir('empty-home');
+    const none = await runCLI(['doctor', '--store', 'team-context'], {
+      cwd: tempDir,
+      env: { ...env, HOME: emptyHome },
+    });
+    expect(none.exitCode).toBe(0);
+    expect(none.stdout).toContain('PEV Skills');
+    expect(none.stdout).toContain('(none discovered)');
+  });
+
   it('shows broken relationships with pasteable fixes at exit 0', async () => {
     fs.writeFileSync(
       path.join(storeRoot, 'openspec', 'config.yaml'),

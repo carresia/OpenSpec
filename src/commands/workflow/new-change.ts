@@ -11,6 +11,8 @@ import chalk from 'chalk';
 import ora from 'ora';
 import path from 'path';
 import { createChange, validateChangeName } from '../../utils/change-utils.js';
+import { resolveSchema } from '../../core/artifact-graph/resolver.js';
+import { discoverPevSkills } from '../../core/pev/skill-registry.js';
 import { formatChangeLocation } from '../../core/planning-home.js';
 import {
   resolveRootForCommand,
@@ -47,6 +49,8 @@ interface NewChangeOutput {
     schema: string;
   };
   root: RootOutput;
+  /** Advisory pev skill-availability warnings (pev-verification-gates). */
+  warnings?: string[];
 }
 
 // -----------------------------------------------------------------------------
@@ -164,6 +168,22 @@ export async function newChangeCommand(name: string | undefined, options: NewCha
       await fs.writeFile(readmePath, `# ${name}\n\n${options.description}\n`, 'utf-8');
     }
 
+    // pev-verification-gates: surface skill availability at creation time so
+    // a missing PEV skill is a known gap from the start, not a dead
+    // delegation link discovered mid-chain. Advisory: creation still succeeds.
+    const schemaArtifacts = resolveSchema(result.schema, projectRoot).artifacts;
+    const declaredPevSkills = [
+      ...new Set(schemaArtifacts.filter((a) => a.pev).map((a) => a.pev!.skill)),
+    ];
+    const installedSkills = new Set(discoverPevSkills().map((s) => s.name));
+    const missingSkills = declaredPevSkills.filter((skill) => !installedSkills.has(skill));
+    const skillWarnings = missingSkills.map(
+      (skill) =>
+        `PEV skill '${skill}' is not installed on this machine. ` +
+        `Install it into ~/skills/ or ~/.claude/skills/ before running its stages, ` +
+        `otherwise they can never reach COMPLETE.`
+    );
+
     const payload: NewChangeOutput = {
       change: {
         id: name,
@@ -172,6 +192,7 @@ export async function newChangeCommand(name: string | undefined, options: NewCha
         schema: result.schema,
       },
       root: toRootOutput(root),
+      ...(skillWarnings.length > 0 ? { warnings: skillWarnings } : {}),
     };
 
     if (options.json) {
@@ -181,6 +202,10 @@ export async function newChangeCommand(name: string | undefined, options: NewCha
 
     spinner?.stop();
     printCreatedChangeHuman(payload, root);
+    for (const warning of skillWarnings) {
+      console.log();
+      console.log(chalk.yellow(`Warning: ${warning}`));
+    }
     printImplicitRootNotice(root);
   } catch (error) {
     spinner?.stop();

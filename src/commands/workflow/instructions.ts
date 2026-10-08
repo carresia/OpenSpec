@@ -16,6 +16,7 @@ import {
   type ArtifactInstructions,
 } from '../../core/artifact-graph/index.js';
 import { isSpecsArtifactPath } from '../../core/artifact-graph/outputs.js';
+import { discoverPevSkills } from '../../core/pev/skill-registry.js';
 import { findUnreadDeltaFiles } from '../../utils/spec-discovery.js';
 import {
   getChangeDir,
@@ -165,17 +166,71 @@ export async function instructionsCommand(
       );
     }
 
+    // pev-verification-gates: a blocked artifact gets no instructions. The
+    // refusal names every incomplete prerequisite (direct or transitive) and
+    // the signal that completes it, so the executor is pointed at the real
+    // next step instead of instructions it must not act on yet.
+    const schema = resolveSchema(context.schemaName, projectRoot);
+    const missingPrereqs = collectMissingPrerequisites({
+      requiredArtifactIds: [...artifact.requires],
+      schema,
+      buildOrder: context.graph.getBuildOrder(),
+      completed: context.completed,
+    });
+    if (missingPrereqs.length > 0) {
+      spinner?.stop();
+      const detail = missingPrereqs
+        .map((id) => {
+          const dep = schema.artifacts.find((a) => a.id === id);
+          const signal =
+            dep?.pev && context.metadata?.pev_round
+              ? path.join('.pev', context.metadata.pev_round, dep.pev.runDir, 'state.json')
+              : dep?.generates ?? id;
+          return `  - ${id} (complete when: ${signal})`;
+        })
+        .join('\n');
+      throw new Error(
+        `Artifact '${artifactId}' is blocked by incomplete prerequisite(s):\n${detail}\n` +
+          `Run openspec status --change ${changeName} to see the next artifact.`
+      );
+    }
+
     const instructions = generateInstructions(context, artifactId, projectRoot, {
       projectConfig,
       references,
     });
     const isBlocked = instructions.dependencies.some((d) => !d.done);
 
+    // pev-verification-gates: warn when the skill this artifact delegates to is
+    // not installed on this machine, so the delegation is never a silent dead
+    // link (the stage can never reach COMPLETE without it).
+    const skillWarnings: string[] = [];
+    if (artifact.pev) {
+      const installed = new Set(discoverPevSkills().map((s) => s.name));
+      if (!installed.has(artifact.pev.skill)) {
+        skillWarnings.push(
+          `PEV skill '${artifact.pev.skill}' is not installed on this machine. ` +
+            `Install it into ~/skills/ or ~/.claude/skills/ before working on '${artifactId}', ` +
+            `otherwise the stage can never reach COMPLETE.`
+        );
+      }
+    }
+
     spinner?.stop();
 
     if (options.json) {
-      console.log(JSON.stringify({ ...instructions, root: toRootOutput(root) }, null, 2));
+      console.log(
+        JSON.stringify(
+          { ...instructions, ...(skillWarnings.length > 0 ? { warnings: skillWarnings } : {}), root: toRootOutput(root) },
+          null,
+          2
+        )
+      );
       return;
+    }
+
+    for (const warning of skillWarnings) {
+      console.log(`⚠ ${warning}`);
     }
 
     printInstructionsText(instructions, isBlocked);
@@ -603,16 +658,18 @@ export async function generateApplyInstructions(
   const schemaInstruction = applyConfig?.instruction ?? null;
   const operationInputs = loadOperationInputs(options.projectConfig ?? null, 'apply');
 
-  // Check which required artifacts are missing. Artifacts the change skips
-  // via skip_specs count as present - their files must not exist, and
-  // status already reports them complete, so apply cannot block on them.
+  // Check which required artifacts are missing. Completion is the graph's
+  // verdict, not file presence: a PEV-bound artifact with a hand-written
+  // generates file is still incomplete until its state.json is COMPLETE
+  // (pev-verification-gates). Artifacts the change skips via skip_specs count
+  // as present - their files must not exist, and status already reports them
+  // complete, so apply cannot block on them.
   const missingArtifacts: string[] = [];
   for (const artifactId of requiredArtifactIds) {
     if (context.skippedArtifacts?.has(artifactId)) {
       continue;
     }
-    const artifact = schema.artifacts.find((a) => a.id === artifactId);
-    if (artifact && resolveArtifactOutputs(changeDir, artifact.generates).length === 0) {
+    if (!context.completed.has(artifactId)) {
       missingArtifacts.push(artifactId);
     }
   }

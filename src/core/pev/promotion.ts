@@ -13,7 +13,7 @@ export interface PromotionResult {
   verdict?: string;
   source?: string;
   target?: string;
-  status: 'promoted' | 'missing' | 'conflict';
+  status: 'promoted' | 'unverified' | 'missing' | 'conflict';
 }
 
 /** `fs.stat` that returns undefined instead of throwing when the path is absent. */
@@ -81,6 +81,14 @@ export async function promotePevArtifacts(input: {
       verdict: state?.status,
     };
 
+    // State is checked before file existence: an output file without a
+    // COMPLETE state.json is the hand-written bypass shape, and must never
+    // reach the change directory even though the file is right there.
+    if (!state || state.status !== 'COMPLETE') {
+      results.push({ ...base, status: 'unverified' });
+      continue;
+    }
+
     if (!fs.existsSync(source)) {
       results.push({ ...base, status: 'missing' });
       continue;
@@ -106,14 +114,9 @@ export async function promotePevArtifacts(input: {
   return results;
 }
 
-/** Writes the provenance log that survives into the archive. */
-export async function writePevLog(
-  changeDir: string,
-  results: PromotionResult[]
-): Promise<void> {
+/** Renders promotion results as the markdown table shared by pev-log.md and gate errors. */
+export function formatPevLogTable(results: PromotionResult[]): string {
   const lines = [
-    '# PEV Log',
-    '',
     '| artifact | skill | round | runDir | iteration | verdict | status |',
     '| --- | --- | --- | --- | --- | --- | --- |',
   ];
@@ -124,5 +127,14 @@ export async function writePevLog(
       } | ${r.verdict ?? ''} | ${r.status} |`
     );
   }
+  return lines.join('\n');
+}
+
+/** Writes the provenance log that survives into the archive. */
+export async function writePevLog(
+  changeDir: string,
+  results: PromotionResult[]
+): Promise<void> {
+  const lines = ['# PEV Log', '', formatPevLogTable(results)];
   await fs.promises.writeFile(path.join(changeDir, 'pev-log.md'), lines.join('\n') + '\n', 'utf8');
 }
