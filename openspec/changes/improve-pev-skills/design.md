@@ -13,7 +13,7 @@
 - **A 组衔接**:A1-A5 不受影响。B3 explore 的启用条件原挂 A6 规模分级,改挂粗定——粗定时一并确认是否启用实施前取证,记入 workflow state 的 entry 或由模型在 impl 分派时判断。
 - **B 组衔接**:B1/B2 照旧,rc 退出生命周期管理(无 state.json 完成判定),其自身状态机与台账保留。B2 的 spec.md 实施决策段兼任 design 被 skip 时 tasks 的替代输入(见 workflow-decision.md 替代输入映射,实施时核对)。
 
-新增运行时行为需要 delta specs,不能沿用 `skip_specs: true` 进入实现验收(W0.3)。实施前必须明确:替代输入映射逐技能核对、升级 reopens 语义、旧 change 无状态文件的兼容路径。不能仅把 skipped ID 放入 completed 集合来解决输入缺失。
+新增运行时行为需要 delta specs,不能沿用 `skip_specs: true` 进入实现验收(W0.4)。实施前必须明确:替代输入映射逐技能核对、升级 reopens 语义、旧 change 无状态文件的兼容路径。不能仅把 skipped ID 放入 completed 集合来解决输入缺失。
 
 ## 目标与基线
 
@@ -61,7 +61,7 @@ A1 管的是"每次分派上下文有界",不解决起点的 253K。配套三项
 - 方案:JSON 保留,由渲染器生成 md,verifier 改读 md。
 - **JSON 不能删(2026-10-13 核实)**:`validate.py` 有 R1~R16 共 16 条规则对 JSON 字段做计算(契约守恒、覆盖对账、门禁布尔、state 与产物对账等,以 api 为例),九份脚本各有 15~66 行直接引用 artifact 结构(来源:`grep -c artifact */scripts/validate.py`)。删 JSON 等于重写这些脚本去解析 md,交接件已评估过该代价(约 976 行)。
 - **依赖**:先有渲染器(tasks 3.1)。现状 9 份模板全是 `{{}}` 占位符(api 模板 41 处),无渲染脚本。
-- **未验证**:verifier 读 md 是否降低评审准确率,没有数据。参照 cospowers3.0(`plugins/cospowers-system-requirements/skills/cos-system-requirement/references/verify-protocol.md`):结构检查交脚本,评审员读候选文件做语义判断,与本方案分工相近;但我只读了这份协议,未读其检查脚本。md 是否含 verifier 需要的全部字段(self_challenge、红线处置等),逐技能核对(tasks 4.3)。
+- **未验证**:verifier 读 md 是否降低评审准确率,没有数据。参照 cospowers3.0(`plugins/cospowers-system-requirements/skills/cos-system-requirement/references/verify-protocol.md`):结构检查交脚本,评审员读候选文件做语义判断,与本方案分工相近;但我只读了这份协议,未读其检查脚本。md 是否含 verifier 需要的全部字段(self_challenge、红线处置等),逐技能核对(tasks 4.2)。
 - 触及:渲染器、各技能 `agents/verifier.md` 的读取路径、SKILL.md 中的读取约定文字。
 
 ## A3 只读直接上游

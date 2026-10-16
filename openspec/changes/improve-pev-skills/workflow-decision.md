@@ -95,7 +95,7 @@
 
 ## 改动代价(2026-10-16 取证)
 
-**OpenSpec 源码**:引擎不支持逐 change 选阶段,必须改。`schema.artifacts` 在 src 有 16 处非测试引用,行为相关 8 处:`src/core/pev/promotion.ts:71`(归档晋升)、`src/core/validation/validator.ts:192`(校验)、`src/commands/workflow/instructions.ts` 6 处(依赖解析与 apply 必需集)、`src/utils/change-utils.ts:191`(建轮次目录)、`src/utils/nested-change.ts:93`。轮次名硬编码 `prd-<日期>` 并创建 `pm/` 子目录(`src/utils/change-utils.ts:192,201`),prd 剥离后改中性名并去掉 pm。总量:1 个新状态模块 + 粗定/升级 2 个 CLI 命令(挂现有 `src/commands/workflow/` 命令组)+ 8 处消费点接入 active 过滤 + 失败测试。
+**OpenSpec 源码**:引擎不支持逐 change 选阶段,必须改。`schema.artifacts` 在 src 有 27 处非测试引用(2026-10-16 复核):schema 自校验 6 处、纯展示/列举 5 处不随 change 状态变化,图构建/任务进度/旧 skip_specs 共 5 处是否接过滤属实施设计判断,行为相关 11 处:`src/core/pev/promotion.ts:71`(归档晋升)、`src/core/validation/validator.ts:192`(校验)、`src/commands/workflow/instructions.ts` 6 处(依赖解析与 apply 必需集)、`src/core/artifact-graph/instruction-loader.ts:523`(formatChangeStatus 的 apply 必需集回退,status 展示走此函数)、`src/utils/change-utils.ts:191`(建轮次目录)、`src/utils/nested-change.ts:93`。轮次名硬编码 `prd-<日期>` 并创建 `pm/` 子目录(`src/utils/change-utils.ts:192,201`),prd 剥离后改中性名并去掉 pm。总量:1 个新状态模块 + 粗定/升级 2 个 CLI 命令(挂现有 `src/commands/workflow/` 命令组)+ 11 处消费点接入 active 过滤 + 失败测试。
 
 **PEV 技能**:skip 的阶段根本不被调用,多数技能零改动。要动三个:behavior-decompose 输入契约(上游改为外部澄清文档)、architecture-design(设计产出增加"workflow 对照与升级判定"节 + verifier 检查项)、requirement-clarify(产物落点改 change 目录)。另加 openspec-propose 的粗定环节指引。
 

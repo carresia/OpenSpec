@@ -6,7 +6,7 @@
 
 用户确认四项决策,形成动态 workflow 定案(详见 `workflow-decision.md`):prd 与 rc 剥离出 workflow、未涉及阶段设为 skip 且零产出、粗定 workflow 在需求澄清与初步探索之后由人和模型共同确认、升级检测只发生在 design 之后并保留人工发起升级。三项研究结论(`research.md`)转入实施:动态阶段选择、单一 `.openspec-workflow.json`、显式升级。
 
-新方向改 OpenSpec 源码(状态模块 + 粗定/升级命令 + 8 处消费点接入 active 过滤)并直接演进 pev schema(删 prd/spec,删 pev-lite),下文”源码不动 / 无 Modified Capabilities”仅属于原方案。实现前需补 delta specs,不能以本 change 现有 skip_specs 标记绕过行为契约。技能优化范围(A/B 组)保留。
+新方向改 OpenSpec 源码(状态模块 + 粗定/升级命令 + 11 处消费点接入 active 过滤)并直接演进 pev schema(删 prd/spec,删 pev-lite),下文”源码不动 / 无 Modified Capabilities”仅属于原方案。实现前需补 delta specs,不能以本 change 现有 skip_specs 标记绕过行为契约。技能优化范围(A/B 组)保留。
 
 ## Why
 
@@ -38,7 +38,7 @@
   **补充(2026-10-13 核实)**:A1 解决不了起点的 253K,需配套"PEV 链在新会话启动 + 阶段间压缩 + 主会话只留状态"。
 - **A2 verifier 读 md,不读 JSON**:`iterations/NN-artifact.json` 保留,作为 `validate.py` 与渲染器的输入;`output/*.md` 由渲染器从 JSON 生成,verifier 读 md。
   **JSON 不能删(2026-10-13 核实)**:`validate.py` 有 R1~R16 共 16 条规则对 JSON 字段做计算(契约守恒、覆盖对账、门禁布尔等),九份脚本各有 15~66 行直接引用 artifact 结构。删 JSON 等于重写这些脚本去解析 md,不采用。
-  **未验证**:verifier 改读 md 后评审准确率是否下降,没有数据;md 是否包含 verifier 需要的全部字段(如 self_challenge、红线处置),实施时逐技能核对(tasks 4.3)。
+  **未验证**:verifier 改读 md 后评审准确率是否下降,没有数据;md 是否包含 verifier 需要的全部字段(如 self_challenge、红线处置),实施时逐技能核对(tasks 4.2)。
 - **A3 只读直接上游**:直接上游读全文,更上游仅按 evidence ledger 条目 ID 引用核对,不默认重读原文。不另行规定"先 grep 再 read"。
   **约束对象修正(2026-10-13 核实)**:重复读主要发生在验证子代理内,不在主会话;A3 应主要约束验证方。
 - **A4 复验收口(取代原"收紧 REVISE")**:第 1 轮全量评;第 2 轮起只核对上轮 findings 是否修好 + 有无回归,不再全量重跑。原方案"仅 critical_issues 非空或总分低于阈值才打回"挡不住"每轮冒新问题",因为新问题常被计为 critical。
@@ -74,7 +74,7 @@
 
 ### New Capabilities
 
-动态 workflow 生命周期行为(逐 change active/skip、粗定、design 检测点升级)——实施前补 delta specs(W0.3),不沿用 skip_specs 绕过行为契约。
+动态 workflow 生命周期行为(逐 change active/skip、粗定、design 检测点升级)——实施前补 delta specs(W0.4),不沿用 skip_specs 绕过行为契约。
 
 ### Modified Capabilities
 
@@ -85,7 +85,7 @@
 
 - 修改对象:`~/skills/{product-manager, requirement-clarify, behavior-decompose, architecture-design, module-design, api-and-interface-design, database-schema-design, planning-and-task-breakdown, incremental-implementation, test-driven-development}` 的 SKILL.md 与 scripts/。
 - 参考实现(只读借鉴,不引入文件):`~/project/ai/skills-dir/claude-skills/engineering/grill-me`、`~/project/ai/skills-dir/mattpocock-skills/skills/skills/engineering/to-spec`、`~/Documents/mechunit/cospowers3.0/plugins/cospowers-decompose/agents/explore.md`。
-- 本仓库改动(2026-10-16 定案后):`src/`(workflow state 模块、粗定/升级 CLI 命令、8 处消费点 active 过滤、失败测试)、`schemas/pev/`(删 prd/spec,演进为 8 artifact 菜单;项目内落点是 `openspec/schemas/`,由 `getProjectSchemasDir` 决定,仓库根 `schemas/` 是随包发布的副本,两者都要改)、删除 `openspec/schemas/pev-lite/`;`openspec/specs/` 由 delta specs 更新(W0.3)。
+- 本仓库改动(2026-10-16 定案后):`src/`(workflow state 模块、粗定/升级 CLI 命令、11 处消费点 active 过滤、失败测试)、`schemas/pev/`(删 prd/spec,演进为 8 artifact 菜单;项目内落点是 `openspec/schemas/`,由 `getProjectSchemasDir` 决定,仓库根 `schemas/` 是随包发布的副本,两者都要改)、删除 `openspec/schemas/pev-lite/`;`openspec/specs/` 由 delta specs 更新(W0.4)。
 - 回滚:`~/skills/pev-skills-backup-20261011.tar.gz`(564K,9 个链上技能,2026-10-11 11:11 打包);test-driven-development 动前需补备份。
 - 交付:不打包、不发同事(2026-10-13 决定),只在本机 `~/skills/` 生效。
 - 验收:①requirement-clarify 实测一轮 grilling 节奏交互;②下一轮实施中 explore agent 实际分派并产出取证结构;③agent 提示词归一化实验的字节数对比(tasks 2.4)。**基线不重测**(2026-10-13 决定):改后不做 token 降幅对比,减耗只按机制是否落地验收,不宣称降幅。

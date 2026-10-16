@@ -136,8 +136,8 @@ rc 不再自己实现提问规则,改为调用 `~/project/ai/skills-dir/mattpoco
 ## 12. 契约不回归
 
 - [ ] 12.1 `scripts/validate.py` 保留,`openspec doctor` 的 PEV Skills 检测通过
-- [ ] 12.2 `openspec status` / `validate --strict` / promotion / archive 对既有 .pev 轮次行为不变
-- [ ] 12.3 归档镜像保留(拍板);不动 `promotion.ts` 的两目标写入与 `validator.ts:194` 的 `.pev` 读取
+- [ ] 12.2 `openspec status` / `validate --strict` / promotion / archive 对已归档与已完成的既有 .pev 轮次行为不变;其他仓库进行中轮次的 prd/spec 从检查集消失是定案接受的残留风险(workflow-decision.md 改动代价),不算回归(2026-10-16 标注)
+- [ ] 12.3 归档镜像保留(拍板);不动 `promotion.ts:104-110` 的两目标写入机制与 `validator.ts:194` 的 `.pev` 读取机制;`promotion.ts:71` 遍历集合接 active 过滤归 W1.4,不在此限(2026-10-16 标注)
 
 ## 13. 验收
 
