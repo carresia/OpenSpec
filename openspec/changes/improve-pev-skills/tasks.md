@@ -7,7 +7,7 @@
 - [x] W0.1 形成阶段 0、`compact-plan`、条件 DAG、`SKIPPED` 和升级机制的调研结论，写入 `research.md`
 - [x] W0.2 确认第一版采用动态阶段选择 + 单一 `.openspec-workflow.json`，不引入通用条件 DSL
 - [x] W0.3 定案写入 `workflow-decision.md`(2026-10-16):prd/rc 剥离、未涉及阶段 skip 且零产出、粗定在澄清+初探后、design 唯一自动检测点 + 保留人工升级、直接演进 pev 删 pev-lite;skip 保留 evidence 字段
-- [ ] W0.4 补 delta specs(动态 workflow 生命周期行为)并移除 skip_specs 标记;替代输入映射逐技能核对(对照 workflow-decision.md 映射表,核实各技能 SKILL.md 与 validate.py 的输入检查)
+- [x] W0.4 补 delta specs(动态 workflow 生命周期行为)并移除 skip_specs 标记;替代输入映射逐技能核对(对照 workflow-decision.md 映射表,核实各技能 SKILL.md 与 validate.py 的输入检查)。已完成(2026-10-16):delta specs 落 `specs/pev-dynamic-workflow/`(5 条 ADDED)与 `specs/pev-verification-gates/`(3 条 MODIFIED);核对结论落 `input-mapping-audit.md`(不符点:rc 产物落点、decompose 溯源措辞、tasks 拒绝纯 Spec 输入)
 - [ ] W0.5 测试先行实现；status/instructions/apply/validate/archive 一起接通后验收。此前试写已撤回，不计完成
 
 ## W1. Workflow state 接入
@@ -35,10 +35,10 @@
 ## W4. schema 演进与技能落点
 
 - [ ] W4.1 pev schema 删 `prd`、`spec`,catalog `requires` 置空;同步改仓库根 `schemas/pev/`(随包发布副本)与项目 `openspec/schemas/` 两处
-- [ ] W4.2 删除 `openspec/schemas/pev-lite/`(原 8.2-8.4 成果);删除前确认无 change 的 `.openspec.yaml` 引用 `schema: pev-lite`
-- [ ] W4.3 behavior-decompose 输入契约:上游改为 change 目录澄清文档(SKILL.md 与 validate.py 输入检查)
-- [ ] W4.4 requirement-clarify 产物落点改 change 目录;自身状态机与台账保留;rc 退出 OpenSpec 生命周期管理(无阶段完成判定,由 workflow state 的 entry 字段引用)
-- [ ] W4.5 planning-and-task-breakdown 与 incremental-implementation 的替代输入核对:design 被 skip 时 tasks 的 arch_source 取 spec 实施决策段(B2);实施时核对,不得预先假设成立
+- [ ] W4.2 删除 `openspec/schemas/pev-lite/`(原 8.2-8.4 成果);删除前确认无 change 的 `.openspec.yaml` 引用 `schema: pev-lite`。前置取证(2026-10-16):openspec/ 下全部 48 个 `.openspec.yaml`(进行中 30 + 已归档 18)无一处含 `schema: pev-lite`,对全文件 grep `pev` 亦零命中
+- [ ] W4.3 behavior-decompose 输入契约:上游改为 change 目录澄清文档(SKILL.md 与 validate.py 输入检查);动手时按 input-mapping-audit.md 状态注复核其条目(归一化后行号已漂移)
+- [ ] W4.4 requirement-clarify 产物落点改 change 目录;自身状态机与台账保留;rc 退出 OpenSpec 生命周期管理(无阶段完成判定,由 workflow state 的 entry 字段引用);动手时按 input-mapping-audit.md 状态注复核其条目(归一化后行号已漂移)
+- [ ] W4.5 planning-and-task-breakdown 与 incremental-implementation 的替代输入核对:design 被 skip 时 tasks 的 arch_source 取 spec 实施决策段(B2);实施时核对,不得预先假设成立;同场补核 audit 映射表缺口第 3 行(api/db 技能接受"架构设计直接承接"的现状)并按状态注复核行号
 
 ## 历史任务
 
@@ -53,11 +53,11 @@
 
 ## 2. 统一脚本与公共文件(2026-10-13 拍板;**先做**,后续多项依赖目录布局)
 
-- [ ] 2.1 归一化 9 份 `validate.py`:抽公共核心(Errors/check_type/validate/load_json/find_project_root 等)到 `~/skills/_pev/`,各技能脚本从那里导入;实测重叠度不一(module 526/732、decompose 182/432),逐技能比对后再抽
+- [x] 2.1 归一化 9 份 `validate.py`:抽公共核心(Errors/check_type/validate/load_json/find_project_root 等)到 `~/skills/_pev/`,各技能脚本从那里导入;实测重叠度不一(module 526/732、decompose 182/432),逐技能比对后再抽。已完成(2026-10-16):公共核心落 `_pev/core.py`(94 行)与 `_pev/ledger.py`(263 行,arch/module/api/db 四技能共用),9 份脚本 6633→5452 行;回放与负向夹具 9/9 对 20261016-2011 备份原版 stdout/退出码一致(独立复验 2026-10-16 21 时);抽取边界与留本地变体清单见 `_pev/README.md`,验证套固化在 `_pev/verify/`
 - [x] 2.2 ~~写打包脚本~~ 取消(2026-10-13):不打包、不发同事,不需要技能目录自包含
-- [ ] 2.3 归一化 SKILL.md 公共段(`执行协议`/`状态机`/`Evidence Ledger`):9 份 md5 全不同,先统一术语再抽公共文件
+- [x] 2.3 归一化 SKILL.md 公共段(`执行协议`/`状态机`/`Evidence Ledger`):9 份 md5 全不同,先统一术语再抽公共文件。已完成(2026-10-16):公共机械层落 `_pev/pev-protocol.md`(校验块/Verifier 独立性/状态机主链/Ledger 规则/迭代上限);6 份内联 SKILL.md(pm/rc/decompose/arch/module/api,含术语统一)与 3 份 references/pev-protocol.md(db/tasks/impl,保留特有规则)改为引用,diff 对照备份仅公共块变更(独立复验 2026-10-16 21 时)
 - [ ] 2.4 **实验**(不预先改):挑 api 与 module 两个技能,抽出 `agents/*.md` 的公共部分,量前后单次分派读取字节数;净省不到 15%(暂定阈值)就放弃。现状 27 个文件合计 127060 字节,单次分派只读本技能三个文件。**技能目录本身不挪**——挪进 `~/.claude/agents/` 会导致技能不被加载
-- [ ] 2.5 公共文件落位后,重跑 `openspec doctor` 确认 PEV Skills 检测仍通过
+- [x] 2.5 公共文件落位后,重跑 `openspec doctor` 确认 PEV Skills 检测仍通过。已完成(2026-10-16):PEV Skills 9/9 检出,`_pev/`(含 verify/ 子目录)不被误判为技能(独立复验 2026-10-16 21 时)
 
 ## 3. md 渲染器 + 门禁布尔脚本写入(2026-10-13 拍板)
 
@@ -111,7 +111,7 @@
 
 rc 不再自己实现提问规则,改为调用 `~/project/ai/skills-dir/mattpocock-skills/skills/skills/productivity/grilling`。节奏与前置条件见 proposal B1、design B1。
 
-- [ ] 9.1 **先装 grilling**:`~/.claude/skills/` 与 `~/.agents/skills/` 下都没有它的软链接,不装则调用失败
+- [x] 9.1 ~~先装 grilling~~ 已消解(2026-10-17 核实):`~/.claude/skills/grilling` 与 `~/.agents/skills/grilling` 软链接均已存在(建于 2026-10-14,指向 `~/project/ai/skills-dir/mattpocock-skills/skills/skills/productivity/grilling`),零改动
 - [ ] 9.2 删除 SKILL.md:113"一次性问齐,不要逐条追问"
 - [ ] 9.3 rc 的提问阶段改为调用 grilling 技能;写明调用点与传入的初始 frontier
 - [ ] 9.4 rc 预生成的两份清单(价值性提问 + 逐章模糊扫描)作为 grilling 的决策树初始节点传入,否则它会从零开始问
@@ -127,7 +127,7 @@ rc 不再自己实现提问规则,改为调用 `~/project/ai/skills-dir/mattpoco
 
 ## 11. 能力:实施前 explore agent(参考 cospowers explore.md)
 
-- [ ] 11.1 定义 explore agent 契约:输入白名单四项(sourceRoot/scope/questions+Q-ID/stopCondition)、只读不写、有界轮次、四段返回。**已有可复用实现**:`~/.claude/agents/pev-explore.md`(白名单 `Read, Grep, Glob, Bash`,已实测派发成功)
+- [x] 11.1 定义 explore agent 契约:输入白名单四项(sourceRoot/scope/questions+Q-ID/stopCondition)、只读不写、有界轮次、四段返回。**已有可复用实现**:`~/.claude/agents/pev-explore.md`(白名单 `Read, Grep, Glob, Bash`,已实测派发成功)。2026-10-16 拍板:不禁联网,Bash 网络访问默认可用,有界性由派发侧 questions/stopCondition 承担
 - [ ] 11.2 incremental-implementation 增加开工前探索分派,产出写入 `.pev/<轮次>/impl/explore/`,Evidence 并入台账
 - [ ] 11.3 executor 改为读现状取证图 + 按需按行范围抽查,不重复全量探索
 - [ ] 11.4 unresolved 缺口对应任务标记阻塞,不得瞎猜开工

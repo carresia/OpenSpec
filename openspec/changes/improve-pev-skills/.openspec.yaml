@@ -1,4 +1,3 @@
 schema: spec-driven
 created: 2026-10-11
-skip_specs: true
 goal: PEV 技能双目标改造——token 减耗(subagent 分派根治上下文爆炸)+ 能力优化(requirement-clarify 逐题拷问与工程 spec 化、实施前 explore 取证)
