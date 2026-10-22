@@ -8,16 +8,16 @@
 - [x] W0.2 确认第一版采用动态阶段选择 + 单一 `.openspec-workflow.json`，不引入通用条件 DSL
 - [x] W0.3 定案写入 `workflow-decision.md`(2026-10-16):prd/rc 剥离、未涉及阶段 skip 且零产出、粗定在澄清+初探后、design 唯一自动检测点 + 保留人工升级、直接演进 pev 删 pev-lite;skip 保留 evidence 字段
 - [x] W0.4 补 delta specs(动态 workflow 生命周期行为)并移除 skip_specs 标记;替代输入映射逐技能核对(对照 workflow-decision.md 映射表,核实各技能 SKILL.md 与 validate.py 的输入检查)。已完成(2026-10-16):delta specs 落 `specs/pev-dynamic-workflow/`(5 条 ADDED)与 `specs/pev-verification-gates/`(3 条 MODIFIED);核对结论落 `input-mapping-audit.md`(不符点:rc 产物落点、decompose 溯源措辞、tasks 拒绝纯 Spec 输入)
-- [ ] W0.5 测试先行实现；status/instructions/apply/validate/archive 一起接通后验收。此前试写已撤回，不计完成
+- [x] W0.5 测试先行实现；status/instructions/apply/validate/archive 一起接通后验收。已完成(2026-10-21,commit 9a182a0):独立评审子代理 2 Important 修复后复验,2026-10-22 在 6db9e24 上复跑确认——全量 6459/6459 过、lint 净、`validate improve-pev-skills --strict` 过。此前试写已撤回，不计完成
 
 ## W1. Workflow state 接入
 
-- [ ] W1.1 新增 workflow state 模块:读校验 `.openspec-workflow.json`——active ∪ skipped 覆盖 schema 全集、SKIPPED 三字段(reason/evidence/decidedBy)、entry.requirement 存在性、未知 ID、依赖闭包;无状态文件走旧行为,损坏报错不静默回退
-- [ ] W1.2 `status --json` 与文本输出展示 active 阶段、skip 理由与升级历史
-- [ ] W1.3 `instructions` 区分 workflow skip 与旧 `skip_specs`;skip 阶段不生成模板指令、不计入依赖阻塞
-- [ ] W1.4 `apply` 必需集只计算 active artifact;validate/archive 用同一 active state,SKIPPED 不得当 COMPLETE;promotion 只遍历 active,skip 不记 unverified
-- [ ] W1.5 轮次命名去 `prd-` 前缀(`src/utils/change-utils.ts:192`)、去掉 `pm/` 目录创建(`:201`)
-- [ ] W1.6 失败测试:malformed、缺证据、未知 artifact、覆盖不全、active 依赖断裂、旧 change 无状态文件兼容
+- [x] W1.1 新增 workflow state 模块:读校验 `.openspec-workflow.json`——active ∪ skipped 覆盖 schema 全集、SKIPPED 三字段(reason/evidence/decidedBy)、entry.requirement 存在性、未知 ID、依赖闭包;无状态文件走旧行为,损坏报错不静默回退。已完成(2026-10-21):`src/core/workflow-state/{schema,state,index}.ts`,read-workflow-state.test.ts 14/14
+- [x] W1.2 `status --json` 与文本输出展示 active 阶段、skip 理由与升级历史。已完成:instruction-loader.ts formatChangeStatus + status.ts printStatusText,status-workflow-state.test.ts 7/7
+- [x] W1.3 `instructions` 区分 workflow skip 与旧 `skip_specs`;skip 阶段不生成模板指令、不计入依赖阻塞。已完成:getDependencyInfo 增 skipReason 并过滤 upstream,skip 阶段不进依赖阻塞
+- [x] W1.4 `apply` 必需集只计算 active artifact;validate/archive 用同一 active state,SKIPPED 不得当 COMPLETE;promotion 只遍历 active,skip 不记 unverified。已完成:graph 可选 skipped 参数(apply 必需集)、validator/archive 门、promotion skippedArtifactIds
+- [x] W1.5 轮次命名去 `prd-` 前缀(`src/utils/change-utils.ts:192`)、去掉 `pm/` 目录创建(`:201`)。已完成:round-2026-10-08-2 形态,RED→GREEN 验证
+- [x] W1.6 失败测试:malformed、缺证据、未知 artifact、覆盖不全、active 依赖断裂、旧 change 无状态文件兼容。已完成:workflow-state-chain.test.ts 13/13(五面接通)+各面失败用例分散在对应套件
 
 ## W2. 粗定 workflow(取代阶段 0)
 
@@ -144,3 +144,11 @@ rc 不再自己实现提问规则,改为调用 `~/project/ai/skills-dir/mattpoco
 - [x] 13.1 ~~重打 zip 发同事~~ 取消(2026-10-13):不打包、不发同事
 - [ ] 13.2 requirement-clarify 实测一轮 grilling 节奏交互,确认按轮提问与推荐答案生效
 - [ ] 13.3 下一轮实施中 explore agent 实际分派,产出四段取证结构
+
+## 14. SKILL.md 提示词归一化(先实验,不预先改)
+
+- [x] 14.1 2026-10-20 四代理审计(结论:重复存在≠token 浪费,提示词层只有候选清单、无合并结论;validate.py 层另有 1959 行可再统一)
+- [x] 14.2 零风险清理+低风险合并落地:死导入×6 组、逐字重复函数(arch/module load_json)、check_finding_trace 入 ledger(stuck_noun 参数)、check_evidence_resolvable 入 ledger(source_check 注入)、load_redline_library 入 ledger(filename+catch_utf8)、load_json 四变体并为 core.load_json_utf8(note/label)、FILE_SCHEMAS 入 core;脚本 5452→5101 行、_pev 357→434 行,四轮每轮 verify_installed.py 9/9+9/9 全过(2026-10-20;module 快照三件套因经本地 snapshot_of 读 architecture_snapshot,留本地只裁死导入)
+- [x] 14.3 消融实验执行(**2026-10-21 完成,结果无胜出组**):设计见 experiment-skill-md-ablation.md(v2.2);结果回填其 §11。要点:三臂各 4 轮会话跑完(随机序 A0→A1→A2,机制=文件替换 fallback+trap 恢复+sha256 校验,正本终态 MANIFEST 复验全过);峰值 C_t:A0 204,448 / A1 205,212(D=-0.4%)/ A2 203,778(D=+0.3%),均在 ±10% 内 → 无胜出;不变量 10/10×3 全 PASS;盲评(匿名池+双评审+2 仲裁)A1 3 维、A2 6 维低于 A0 → 按预注册口径判负,不进确认实验;§9 先验「protocol 基本不读」在重跑中变为各读 1-2 次;全部证据在 /tmp/pev-ablation/(manifest、run.log、measure.json、invariants.json、eval/)
+- [x] 14.4 **归一化议程关闭(2026-10-21 用户拍板)**:pilot 判负(盲评下滑+token 无收益)+用户对方向的根本质疑(A1 改动形同虚设、_pev 质量从未验证、引用化反而新增工具调用:历史 protocol 读取 0 次 → 实验中 1-2 次)。**已执行回滚**:9 个 PEV 技能恢复到 _pev 抽取前(2026-10-11 备份)的自包含版(SKILL.md 与 validate.py 均不引用 ~/skills/_pev/;db/impl/planning 三技能回到引用各自技能内 references/pev-protocol.md 的原始形态),两棵树(~/skills 与 ~/.claude/skills)同步恢复,`~/skills/_pev` 已 tar 留档(~/skills/_pev-archived-20261021-1529.tar.gz)后移除;恢复前状态快照 ~/skills/pev-skills-backup-20261021-1529-pre-restore.tar.gz;恢复后验证:9 技能零 _pev 引用、mechunit prd-2026-10-08-2 全轮 validate 8/9 过(db R16 为历史遗留,与恢复前一致)。后续:skills 内容质量另立 change 评审(用户 2026-10-21 拍板方向:改进 skills 本身的质量,不是形式归一化)
+
