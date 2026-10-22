@@ -1,0 +1,25 @@
+--- /Users/zhengshan/skills/_pev/pev-protocol.md	2026-10-16 20:44:22
++++ protocol-v2.md	2026-10-20 20:44:07
+@@ -54,6 +54,22 @@
+ 各技能的状态机全图(含 Cross 跨项评审、逐模块/逐库/逐契约面跟踪、`prd_gaps` 打回
+ 等私有边)以各 SKILL.md 及其流程细则为准。
+ 
++## 运行目录(公共规则)
++
++`.pev/` 是 PEV 家族 9 个技能共享的根目录,按需求目标分轮次;每个技能在轮次目录
++下的 `<stage>/`(pm / rc / decompose / arch / module / api / db / tasks / impl)
++工作。目录树骨架(各 stage 的文件布局)是技能私有的,见各 SKILL.md「运行目录」节。
++
++- 上游**引用不复制**:`state.upstream_source` 记录上游产物路径,
++  `state.upstream_kind` 标记类型,溯源与打回都以它为准。
++- 轮次跟随上游:上游在 `.pev/` 某轮,本技能就在该轮的 `<stage>/` 工作;上游是
++  外部路径且 `.pev/` 无可复用轮次时,跟随其所属轮次或新开 `prd-<今日日期>/`
++  (同日同名追加 `-2`、`-3`)。
++- 迭代号 `<N>`:进入新一轮 PLANNING(REPLAN、上游已更新)时 `iteration+1`,
++  产物用新号,旧迭代文件原样保留;REVISE 轮不改号,修订后的 artifact /
++  verification 覆盖同号文件,复用原 Plan(REVISE 轮无 `<N>-plan.json` 是正常的)。
++  文件号零填充两位(01、02…)。
++
+ ## 校验(每步必做)
+ 
+ 每步产物写入文件后,先把**文件名**登记进 `state.plans` / `state.artifacts`

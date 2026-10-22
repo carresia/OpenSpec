@@ -1,0 +1,51 @@
+--- module-SKILL-A1.md	2026-10-20 20:41:18
++++ module-SKILL-A2.md	2026-10-20 20:45:02
+@@ -99,14 +99,12 @@
+         └── <module-id>/       # 每模块一个目录
+ ```
+ 
+-上游**引用不复制**。`state.upstream_source` 记录架构产物路径,
+-`state.upstream_kind` 标记类型(architecture / architecture_doc)。轮次跟随上游:
+-架构在同轮 `arch/`,本 skill 就在该轮的 `module/` 工作;架构是外部路径且 `.pev/`
+-无可复用轮次时,跟随其所属轮次或新开 `prd-<今日日期>/`(同日同名追加 `-2`、`-3`)。
++上游引用不复制、轮次跟随、同日同名追加 `-2`/`-3`、迭代号语义与零填充等公共规则见
++[pev-protocol.md(~/skills/_pev/)](../_pev/pev-protocol.md) §运行目录。本技能:
++`upstream_kind` 取 architecture / architecture_doc,上游在同轮 `arch/`。
+ 
+ 一份 `iterations/<N>-artifact.json` 承载**全部目标模块**的设计;REVISE 轮只修订受影响
+-模块、其余模块原样带入并覆盖同号文件;REPLAN 轮 `iteration+1` 用新号,旧迭代文件原样
+-保留。文件号零填充两位(01、02…)。
++模块、其余模块原样带入并覆盖同号文件。
+ 
+ ## 目标模块与深度选择(INIT 时一次定齐)
+ 
+@@ -147,22 +145,16 @@
+ | 阶段 | 读什么 | 产出 | 完成条件 |
+ |---|---|---|---|
+ | 0 恢复 | `.pev/` 下最新含 `module/state.json` 轮次的该文件(若存在) | 状态汇报 | **不重新 INIT、不覆盖已有产物**;用户明确要求重开时把 `module/` 归档为 `module.bak-<日期>/`(不动同轮其他子目录)后重建 |
+-| 1 INIT | 架构产物路径 | `state.json`:`status="INIT"`、`iteration=0`、`max_iterations=5`、`upstream_source`、`upstream_kind`、`mode="design"`、`modules[]`(id+design_mode) | 目标模块与深度一次问齐(见上节);每模块规模线索(内部复杂度/状态量/外部交互数)能从架构或代码推断则记入 `assumptions` |
+-| 2 PLANNING | `agents/planner.md`、`playbooks/design.md` | `iterations/<N>-plan.json` | 校验通过 → `state.plans` 登记,`status="EXECUTING"` |
+-| 3 EXECUTING | `agents/executor.md` | `iterations/<N>-artifact.json`(全部模块) | 逐模块完成:溯源三档 + self_challenge 7 维;跨模块自查(cross_check)完成;精修循环 `done` → `status="completed"`,全部模块 `design_status="done"` |
+-| 4 VERIFYING | `agents/verifier.md` | `iterations/<N>-verification.json` | 逐模块 module_reviews + 全部 PASS 后 cross_review;独立性机制见下 |
+-| 5 分支 | verdict | 见状态机 | PASS → 逐模块按深度渲染到 `output/<module-id>/`,同时呈交 verification 的 `warnings` 与残留项;用户确认后 `status="COMPLETE"`,设计交给下游 skill |
+ 
+-**校验**:每步产物落盘后,先把**文件名**登记进 `state.plans` / `state.artifacts`
+-(只记文件名,不存内容副本),再运行校验脚本:
++阶段 1-5(INIT / PLANNING / EXECUTING / VERIFYING / 分支)的逐阶段表见
++[references/stage-table.md](references/stage-table.md);阶段语义与完成条件不变,
++仍严格按序执行。
+ 
+-```bash
+-python3 <skill 目录>/scripts/validate.py <项目>/.pev/<轮次>/module/
+-```
++**校验**:每步产物落盘后,先登记文件名再校验(命令、登记先于校验、登记册双向
++对账、不得带病流转、门禁比对时机、无 Python 兜底等公共规则见
++[pev-protocol.md(~/skills/_pev/)](../_pev/pev-protocol.md) §校验;本技能
++`<stage>` 为 `module/`)。
+ 
+-登记册双向对账、不得带病流转、门禁比对时机、无 Python 兜底等公共规则见
+-[pev-protocol.md(~/skills/_pev/)](../_pev/pev-protocol.md)。
+-
+ **Verifier 的独立性**——两种实现方式(有子代理 spawn 只读子代理 / 无子代理切换
+ 角色从文件重新推导)的公共规则见 [pev-protocol.md(~/skills/_pev/)](../_pev/pev-protocol.md)。
+ 本 skill 传给子代理的文件:`agents/verifier.md`、`rubrics/module-review.md`、

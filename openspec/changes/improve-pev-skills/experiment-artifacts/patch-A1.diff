@@ -1,0 +1,23 @@
+--- module-SKILL-A0.md	2026-10-20 20:41:06
++++ module-SKILL-A1.md	2026-10-20 20:41:18
+@@ -123,15 +123,15 @@
+ 
+ ## 状态机
+ 
++主链 `INIT → PLANNING → EXECUTING → VERIFYING` 与 PASS / REVISE / REPLAN / BLOCKED
++分支、WAITING_FOR_INPUT 恢复、回上游挂起、迭代上限的公共规则见
++[pev-protocol.md(~/skills/_pev/)](../_pev/pev-protocol.md) §状态机。本技能的私有边:
++
+ ```text
+-INIT → PLANNING → EXECUTING → VERIFYING(逐模块评审)
+-                                  │
+         全部模块 PASS ──────────► Cross(跨模块一致性评审)
+                                   │
+-        PASS ────────────────► COMPLETE(渲染 output/ → 用户确认)
++        Cross PASS ─────────────► COMPLETE(渲染 output/ → 用户确认)
+         REVISE ──────────────► EXECUTING(只修订受影响模块,不改 Plan)
+-        REPLAN ──────────────► PLANNING(重规划,iteration+1)
+-        BLOCKED ─────────────► WAITING_FOR_INPUT(架构层缺口待用户三选一)
+         用户选"回架构" ────────► WAITING_FOR_UPSTREAM(记 upstream_gaps,挂起等架构更新)
+         架构已更新 ───────────► PLANNING(iteration+1,只重做受影响模块)
+ ```
