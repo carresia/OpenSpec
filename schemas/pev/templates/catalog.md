@@ -1,6 +1,6 @@
-<!-- 本 artifact 由 PEV skill `$behavior-decompose` 产出，归档晋升为 catalog.md。 -->
-
 # Behavior Catalog
+
+<!-- 本 artifact 由 PEV skill `$behavior-decompose` 产出，归档晋升为 catalog.md。 -->
 
 ## Epic
 

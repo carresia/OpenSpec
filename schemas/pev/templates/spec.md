@@ -1,6 +1,6 @@
-<!-- 本 artifact 由 PEV skill `$requirement-clarify` 产出，归档晋升为 spec.md。 -->
-
 # Spec
+
+<!-- 本 artifact 由 PEV skill `$requirement-clarify` 产出，归档晋升为 spec.md。 -->
 
 ## 范围
 

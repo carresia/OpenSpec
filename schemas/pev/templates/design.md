@@ -1,6 +1,6 @@
-<!-- 本 artifact 由 PEV skill `$architecture-design` 产出，归档晋升为 design/architecture.md。 -->
-
 # Architecture
+
+<!-- 本 artifact 由 PEV skill `$architecture-design` 产出，归档晋升为 design/architecture.md。 -->
 
 ## 上下文
 
