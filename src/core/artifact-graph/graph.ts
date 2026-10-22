@@ -140,16 +140,26 @@ export class ArtifactGraph {
 
   /**
    * Gets artifacts that are ready to be created (all dependencies completed).
+   *
+   * The optional `skipped` set carries the workflow-state skips: a skipped
+   * dependency counts as satisfied (its inputs live outside the engine) while
+   * a skipped artifact is itself never listed as ready. Omitted, every check
+   * behaves exactly as before.
    */
-  getNextArtifacts(completed: CompletedSet): string[] {
+  getNextArtifacts(completed: CompletedSet, skipped?: ReadonlySet<string>): string[] {
     const ready: string[] = [];
 
     for (const artifact of this.artifacts.values()) {
       if (completed.has(artifact.id)) {
         continue; // Already completed
       }
+      if (skipped?.has(artifact.id)) {
+        continue; // Skipped by workflow state: not part of the plan
+      }
 
-      const allDepsCompleted = artifact.requires.every(req => completed.has(req));
+      const allDepsCompleted = artifact.requires.every(
+        req => completed.has(req) || skipped?.has(req)
+      );
       if (allDepsCompleted) {
         ready.push(artifact.id);
       }
@@ -162,9 +172,15 @@ export class ArtifactGraph {
 
   /**
    * Checks if all artifacts in the graph are completed.
+   *
+   * With a `skipped` set, completeness is judged over the non-skipped plan
+   * only — a skipped artifact is never completed, it is outside the plan.
    */
-  isComplete(completed: CompletedSet): boolean {
+  isComplete(completed: CompletedSet, skipped?: ReadonlySet<string>): boolean {
     for (const artifact of this.artifacts.values()) {
+      if (skipped?.has(artifact.id)) {
+        continue;
+      }
       if (!completed.has(artifact.id)) {
         return false;
       }
@@ -174,16 +190,24 @@ export class ArtifactGraph {
 
   /**
    * Gets blocked artifacts and their unmet dependencies.
+   *
+   * Skipped dependencies are not blockers: nothing an agent could run would
+   * complete them, so naming them would point at work the change declined.
    */
-  getBlocked(completed: CompletedSet): BlockedArtifacts {
+  getBlocked(completed: CompletedSet, skipped?: ReadonlySet<string>): BlockedArtifacts {
     const blocked: BlockedArtifacts = {};
 
     for (const artifact of this.artifacts.values()) {
       if (completed.has(artifact.id)) {
         continue; // Already completed
       }
+      if (skipped?.has(artifact.id)) {
+        continue; // Skipped by workflow state: not part of the plan
+      }
 
-      const unmetDeps = artifact.requires.filter(req => !completed.has(req));
+      const unmetDeps = artifact.requires.filter(
+        req => !completed.has(req) && !skipped?.has(req)
+      );
       if (unmetDeps.length > 0) {
         blocked[artifact.id] = unmetDeps.sort((a, b) => this.compareByDeclarationOrder(a, b));
       }

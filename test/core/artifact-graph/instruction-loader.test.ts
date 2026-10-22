@@ -10,6 +10,7 @@ import {
   formatChangeStatus,
   TemplateLoadError,
 } from '../../../src/core/artifact-graph/instruction-loader.js';
+import { WorkflowStateError } from '../../../src/core/workflow-state/index.js';
 
 const PACKAGED_SCHEMAS_DIR = path.join(__dirname, '..', '..', '..', 'schemas');
 
@@ -292,6 +293,146 @@ describe('instruction-loader', () => {
       const context = loadChangeContext(tempDir, 'my-change');
 
       expect(context.completed.has('specs')).toBe(false);
+    });
+
+    // Workflow state (.openspec-workflow.json) wiring: a valid state lands on
+    // the context as its own field; a corrupt one fails the load outright; no
+    // state file leaves the context exactly as today.
+    describe('workflow state', () => {
+      const WORKFLOW_STATE_FILE = '.openspec-workflow.json';
+
+      function writeWorkflowState(changeDir: string, state: unknown): void {
+        fs.writeFileSync(
+          path.join(changeDir, WORKFLOW_STATE_FILE),
+          JSON.stringify(state)
+        );
+      }
+
+      /** Full-coverage spec-driven state with `design` skipped. */
+      function specDrivenState(): Record<string, unknown> {
+        return {
+          version: 1,
+          entry: { requirement: 'requirement.md' },
+          active: ['proposal', 'specs', 'tasks'],
+          skipped: {
+            design: { reason: 'pure refactor', evidence: ['chat 2026-10-16'], decidedBy: 'zhengshan' },
+          },
+          upgrades: [],
+        };
+      }
+
+      function setupChange(): string {
+        const changeDir = path.join(tempDir, 'openspec', 'changes', 'my-change');
+        fs.mkdirSync(changeDir, { recursive: true });
+        fs.writeFileSync(path.join(changeDir, 'requirement.md'), '# Requirement');
+        fs.writeFileSync(path.join(changeDir, 'proposal.md'), '# Proposal');
+        return changeDir;
+      }
+
+      it('throws WorkflowStateError when the state file is corrupt', () => {
+        const changeDir = setupChange();
+        const state = specDrivenState();
+        (state as Record<string, unknown>).active = ['proposal', 'specs']; // design+tasks uncovered
+        writeWorkflowState(changeDir, state);
+
+        expect(() => loadChangeContext(tempDir, 'my-change')).toThrow(WorkflowStateError);
+      });
+
+      it('exposes workflow on the context and never marks skipped artifacts completed', () => {
+        const changeDir = setupChange();
+        // The skipped artifact's output file exists on disk anyway: the red
+        // line is that workflow skips never enter the completed set.
+        fs.writeFileSync(path.join(changeDir, 'design.md'), '# hand-written design');
+        writeWorkflowState(changeDir, specDrivenState());
+
+        const context = loadChangeContext(tempDir, 'my-change');
+
+        expect(context.workflow).toBeDefined();
+        expect(context.workflow?.active.has('proposal')).toBe(true);
+        expect(context.workflow?.skipped.has('design')).toBe(true);
+        expect(context.completed.has('design')).toBe(false);
+        expect(context.completed.has('proposal')).toBe(true);
+      });
+
+      it('keeps the context identical to today when no state file exists', () => {
+        const changeDir = setupChange();
+        fs.writeFileSync(path.join(changeDir, 'design.md'), '# Design');
+
+        const context = loadChangeContext(tempDir, 'my-change');
+
+        expect(context.workflow).toBeUndefined();
+        expect(context.completed.has('design')).toBe(true);
+        expect(context.completed.has('proposal')).toBe(true);
+      });
+
+      it('never lets the legacy skip_specs loop re-complete a workflow-skipped specs artifact', () => {
+        // Both mechanisms on the SAME artifact: skip_specs would synthesize
+        // completion for the specs-path artifact - the workflow skip must win,
+        // because workflow-skipped IDs never enter the completed set.
+        const changeDir = setupChange();
+        fs.writeFileSync(
+          path.join(changeDir, '.openspec.yaml'),
+          'schema: spec-driven\nskip_specs: true\n'
+        );
+        fs.writeFileSync(
+          path.join(changeDir, '.openspec-workflow.json'),
+          JSON.stringify({
+            version: 1,
+            entry: { requirement: 'requirement.md' },
+            active: ['proposal', 'design', 'tasks'],
+            skipped: {
+              specs: { reason: 'no spec-level change', evidence: ['chat'], decidedBy: 'zhengshan' },
+            },
+            upgrades: [],
+          })
+        );
+
+        const context = loadChangeContext(tempDir, 'my-change');
+
+        expect(context.completed.has('specs')).toBe(false);
+        expect(context.skippedArtifacts?.has('specs')).toBeFalsy();
+        expect(context.workflow?.skipped.has('specs')).toBe(true);
+
+        // Both surfaces attribute the skip to the workflow mechanism.
+        const status = formatChangeStatus(context);
+        expect(status.artifacts.find((a) => a.id === 'specs')?.skippedBy).toBe('workflow');
+      });
+
+      it('keeps a workflow-skipped pev stage out of completed even with a COMPLETE state.json', () => {
+        // The pev leg of the red line: detectCompleted honors the skill
+        // contract (COMPLETE + output), and the workflow skip must still win.
+        const pevChangeDir = path.join(tempDir, 'openspec', 'changes', 'pev-change');
+        fs.mkdirSync(pevChangeDir, { recursive: true });
+        fs.writeFileSync(path.join(pevChangeDir, 'requirement.md'), '# Requirement');
+        fs.writeFileSync(
+          path.join(pevChangeDir, '.openspec.yaml'),
+          'schema: pev\npev_round: round-2026-10-17\n'
+        );
+        fs.writeFileSync(
+          path.join(pevChangeDir, '.openspec-workflow.json'),
+          JSON.stringify({
+            version: 1,
+            entry: { requirement: 'requirement.md' },
+            active: ['prd', 'spec', 'catalog', 'specs', 'design', 'modules', 'design-db', 'tasks', 'implement'],
+            skipped: {
+              'design-api': { reason: 'no contracts', evidence: ['e'], decidedBy: 'zhengshan' },
+            },
+            upgrades: [],
+          })
+        );
+        const round = path.join(tempDir, '.pev', 'round-2026-10-17');
+        fs.mkdirSync(path.join(round, 'api', 'output'), { recursive: true });
+        fs.writeFileSync(
+          path.join(round, 'api', 'state.json'),
+          '{"status":"COMPLETE","iteration":1}'
+        );
+        fs.writeFileSync(path.join(round, 'api', 'output', 'a.md'), '# API');
+
+        const context = loadChangeContext(tempDir, 'pev-change');
+
+        expect(context.completed.has('design-api')).toBe(false);
+        expect(context.workflow?.skipped.has('design-api')).toBe(true);
+      });
     });
   });
 

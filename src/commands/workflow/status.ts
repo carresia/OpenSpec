@@ -20,6 +20,7 @@ import {
   type ChangeStatus,
 } from '../../core/artifact-graph/index.js';
 import { resolveNextStep } from '../../core/change-status-policy.js';
+import { sanitizeInline } from '../../core/references.js';
 import { asStatus } from '../shared-output.js';
 import {
   describeNestedChange,
@@ -242,6 +243,32 @@ export function printStatusText(status: ChangeStatus, options: PrintStatusTextOp
 
   console.log(`Change: ${status.changeName}`);
   console.log(`Schema: ${status.schemaName}`);
+  if (status.workflow) {
+    console.log('Workflow:');
+    console.log(`  Active: ${status.workflow.active.join(', ')}`);
+    if (status.workflow.skipped.length > 0) {
+      console.log('  Skipped:');
+      for (const entry of status.workflow.skipped) {
+        console.log(
+          `    - ${entry.id}: ${sanitizeInline(entry.reason)} ` +
+            `(decided by ${sanitizeInline(entry.decidedBy)}, evidence: ${entry.evidence.length})`
+        );
+      }
+    } else {
+      console.log('  Skipped: none');
+    }
+    if (status.workflow.upgrades.length > 0) {
+      console.log('  Upgrades:');
+      for (const upgrade of status.workflow.upgrades) {
+        console.log(
+          `    - ${upgrade.date}: ${sanitizeInline(upgrade.reason)} ` +
+            `(added ${upgrade.added.join(', ')}, decided by ${sanitizeInline(upgrade.decidedBy)})`
+        );
+      }
+    } else {
+      console.log('  Upgrades: none');
+    }
+  }
   if (status.warnings) {
     for (const warning of status.warnings) {
       console.log(chalk.yellow(`Warning: ${warning}`));
@@ -260,7 +287,12 @@ export function printStatusText(status: ChangeStatus, options: PrintStatusTextOp
     let line = `${indicator} ${artifact.id}`;
 
     if (artifact.status === 'skipped') {
-      line += color(' (skipped: change declares skip_specs)');
+      if (artifact.skippedBy === 'workflow') {
+        const entry = status.workflow?.skipped.find((s) => s.id === artifact.id);
+        line += color(` (skipped by workflow state: ${sanitizeInline(entry?.reason ?? '')})`);
+      } else {
+        line += color(' (skipped: change declares skip_specs)');
+      }
     }
 
     if (artifact.status === 'blocked' && artifact.missingDeps && artifact.missingDeps.length > 0) {

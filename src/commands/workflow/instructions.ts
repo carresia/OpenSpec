@@ -166,6 +166,22 @@ export async function instructionsCommand(
       );
     }
 
+    // Workflow state (decision 1, 2026-10-17): a skipped stage never gets
+    // instructions — a hard error with the decision record, not the legacy
+    // skip_specs warning envelope. Checked before the prerequisite gate so the
+    // refusal names the skip, not an unrelated blocking chain.
+    const workflowSkip = context.workflow?.skipped.get(artifactId);
+    if (workflowSkip) {
+      spinner?.stop();
+      throw new Error(
+        `Artifact '${artifactId}' is skipped by this change's workflow state (.openspec-workflow.json):\n` +
+          `  reason: ${workflowSkip.reason}\n` +
+          `  decided by: ${workflowSkip.decidedBy}\n` +
+          `Skipped stages produce nothing; their inputs are provided outside the engine. ` +
+          `To run this stage anyway, revise the workflow state (via a confirmed upgrade, or by editing it before work starts).`
+      );
+    }
+
     // pev-verification-gates: a blocked artifact gets no instructions. The
     // refusal names every incomplete prerequisite (direct or transitive) and
     // the signal that completes it, so the executor is pointed at the real
@@ -176,6 +192,7 @@ export async function instructionsCommand(
       schema,
       buildOrder: context.graph.getBuildOrder(),
       completed: context.completed,
+      skipped: context.workflow ? new Set(context.workflow.skipped.keys()) : undefined,
     });
     if (missingPrereqs.length > 0) {
       spinner?.stop();
@@ -378,12 +395,21 @@ export function printInstructionsText(instructions: ArtifactInstructions, isBloc
     console.log('Read the current contents of these files before creating this artifact (re-read them from disk even if you saw them earlier - they may have been edited):');
     console.log();
     for (const dep of dependencies) {
-      // A dependency satisfied via skip_specs has no files by design: telling
+      // A dependency satisfied via a skip has no files by design: telling
       // the agent to read them (or calling them "done") would send it hunting
-      // for spec files that must not exist.
+      // for files that must not exist. The two mechanisms get their own
+      // wording so the output stays attributable.
       if (dep.skipped) {
         console.log(`<dependency id="${dep.id}" status="skipped">`);
-        console.log(`  <description>Skipped: the change declares skip_specs, so this artifact has no files to read.</description>`);
+        if (dep.skippedBy === 'workflow') {
+          // sanitizeInline flattens CR/LF so an author-written reason cannot
+          // forge lines inside the envelope (mirrors the status surface).
+          const reason = sanitizeInline(dep.skipReason ?? '', Infinity) ||
+            'this stage was deliberately skipped for this change';
+          console.log(`  <description>Skipped by workflow state: ${escapeEnvelopeTags(reason)}. It has no files to read; substitute inputs are provided outside the engine.</description>`);
+        } else {
+          console.log(`  <description>Skipped: the change declares skip_specs, so this artifact has no files to read.</description>`);
+        }
         console.log('</dependency>');
         continue;
       }
@@ -529,14 +555,19 @@ function findArtifactIdFor(
  * skips the artifacts in between - the failure reported in #834 and #869.
  * Walking `requires` names the whole chain, the same set and order
  * `openspec status` already prints, without changing what apply blocks on.
+ *
+ * A workflow-skipped artifact is neither missing nor walked deeper: it will
+ * never be built, and its own prerequisites are satisfied by whatever input
+ * the change substituted outside the engine.
  */
 function collectMissingPrerequisites(input: {
   requiredArtifactIds: string[];
   schema: { artifacts: { id: string; requires: string[] }[] };
   buildOrder: string[];
   completed: Set<string>;
+  skipped?: ReadonlySet<string>;
 }): string[] {
-  const { requiredArtifactIds, schema, buildOrder, completed } = input;
+  const { requiredArtifactIds, schema, buildOrder, completed, skipped } = input;
   const byId = new Map(schema.artifacts.map((artifact) => [artifact.id, artifact]));
   const missing = new Set<string>();
   const queue = [...requiredArtifactIds];
@@ -544,6 +575,7 @@ function collectMissingPrerequisites(input: {
 
   while (queue.length > 0) {
     const id = queue.shift() as string;
+    if (skipped?.has(id)) continue;
     const artifact = byId.get(id);
     if (!artifact) continue;
     if (!completed.has(id)) missing.add(id);
@@ -584,14 +616,21 @@ async function collectApplyWarnings(input: {
   changeDir: string;
   changeName: string;
   skippedArtifacts?: Set<string>;
+  /** Workflow-state skipped IDs: a fully-skipped specs stage expects no deltas. */
+  workflowSkipped?: ReadonlySet<string>;
 }): Promise<string[]> {
-  const { state, schema, changeDir, changeName, skippedArtifacts } = input;
+  const { state, schema, changeDir, changeName, skippedArtifacts, workflowSkipped } = input;
   if (state === 'blocked') return [];
 
   const specArtifacts = schema.artifacts.filter((artifact) =>
     isSpecsArtifactPath(artifact.generates)
   );
   if (specArtifacts.length === 0) return [];
+  // Every specs stage skipped via workflow state: zero deltas is the expected
+  // shape, so the write-the-delta-specs advice (and its validate-will-fail
+  // warning) must stay silent - it would point at a stage instructions
+  // refuses to serve.
+  if (specArtifacts.every((artifact) => workflowSkipped?.has(artifact.id))) return [];
   if (specArtifacts.some((artifact) => skippedArtifacts?.has(artifact.id))) return [];
   const warnings = (await findUnreadDeltaFiles(path.join(changeDir, 'specs'))).map(
     (file) =>
@@ -652,8 +691,15 @@ export async function generateApplyInstructions(
   const applyConfig = schema.apply;
 
   // Determine required artifacts and tracking file from schema
-  // Fallback: if no apply block, require all artifacts
-  const requiredArtifactIds = applyConfig?.requires ?? schema.artifacts.map((a) => a.id);
+  // Fallback: if no apply block, require all artifacts. Workflow-skipped
+  // artifacts drop out of the required set either way: apply's required set
+  // counts active artifacts only (workflow-state contract).
+  const workflowSkipped = context.workflow
+    ? new Set(context.workflow.skipped.keys())
+    : undefined;
+  const requiredArtifactIds = (applyConfig?.requires ?? schema.artifacts.map((a) => a.id)).filter(
+    (id) => !workflowSkipped?.has(id)
+  );
   const tracksFile = applyConfig?.tracks ?? null;
   const schemaInstruction = applyConfig?.instruction ?? null;
   const operationInputs = loadOperationInputs(options.projectConfig ?? null, 'apply');
@@ -663,7 +709,8 @@ export async function generateApplyInstructions(
   // generates file is still incomplete until its state.json is COMPLETE
   // (pev-verification-gates). Artifacts the change skips via skip_specs count
   // as present - their files must not exist, and status already reports them
-  // complete, so apply cannot block on them.
+  // complete, so apply cannot block on them. Workflow-skipped artifacts were
+  // already filtered out of requiredArtifactIds above.
   const missingArtifacts: string[] = [];
   for (const artifactId of requiredArtifactIds) {
     if (context.skippedArtifacts?.has(artifactId)) {
@@ -680,6 +727,7 @@ export async function generateApplyInstructions(
     schema,
     buildOrder: context.graph.getBuildOrder(),
     completed: context.completed,
+    skipped: workflowSkipped,
   });
 
   // Build context files from all existing artifacts in schema
@@ -792,6 +840,7 @@ export async function generateApplyInstructions(
       changeDir,
       changeName,
       skippedArtifacts: context.skippedArtifacts,
+      workflowSkipped,
     })),
   ];
 

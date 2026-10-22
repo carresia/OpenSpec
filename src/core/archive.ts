@@ -1,4 +1,4 @@
-import { constants, createReadStream, promises as fs } from 'fs';
+import { constants, createReadStream, existsSync, promises as fs } from 'fs';
 import { createHash, randomUUID } from 'crypto';
 import path from 'path';
 import { formatLocalDate } from '../utils/date.js';
@@ -35,6 +35,7 @@ import {
 } from '../utils/change-metadata.js';
 import { resolveSchema } from './artifact-graph/resolver.js';
 import { formatPevLogTable, promotePevArtifacts, writePevLog } from './pev/promotion.js';
+import { readWorkflowState, WORKFLOW_STATE_FILENAME } from './workflow-state/index.js';
 import { confirmPrompt, isNonInteractivePromptError } from '../utils/interactive.js';
 import { FileSystemUtils } from '../utils/file-system.js';
 import { folderStyleNameProblem } from './id.js';
@@ -1660,6 +1661,39 @@ export class ArchiveCommand {
       ? await fingerprintPortableContent(path.join(changeDir, METADATA_FILENAME))
       : undefined;
 
+    // workflow state 门禁（pev-dynamic-workflow）：`.openspec-workflow.json` 存在
+    // 即强校验——不受 pevRound/hasDeltaSpecs/--no-validate 豁免，损坏即拒绝归档，
+    // 绝不静默回退为无状态行为。放在任何文件系统变更之前，拒绝时 change 原地
+    // 不动。合法时其 skipped 集交给晋升循环：跳过阶段不晋升、不记 unverified、
+    // 不进留痕表。
+    let workflowSkippedIds: Set<string> | undefined;
+    if (existsSync(path.join(changeDir, WORKFLOW_STATE_FILENAME))) {
+      let workflowSchemaName = '';
+      try {
+        const changeMetadata = readChangeMetadata(changeDir, root.path);
+        if (changeMetadata) workflowSchemaName = changeMetadata.schema;
+      } catch {
+        // 元数据不可读：下面 resolveSchema 以空名失败即 fail-closed 拒绝。
+      }
+      try {
+        const workflowSchema = resolveSchema(workflowSchemaName, root.path);
+        const workflowResult = readWorkflowState(changeDir, workflowSchema);
+        if (workflowResult.status === 'error') {
+          throw new Error(workflowResult.issues.join('; '));
+        }
+        if (workflowResult.status === 'ok') {
+          workflowSkippedIds = new Set(workflowResult.skipped.keys());
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new ArchiveBlockedError(
+          'archive_workflow_state_invalid',
+          `Workflow state in ${WORKFLOW_STATE_FILENAME} for change '${describeChangeName(changeName!)}' is invalid: ${message}`,
+          `修复 change 目录下的 ${WORKFLOW_STATE_FILENAME}（active/skipped 覆盖、跳过证据、依赖边、entry 文件）后重试归档`
+        );
+      }
+    }
+
     // PEV 验证门禁（pev-verification-gates）：把 `.pev/<轮次>/` 各阶段已验证产物
     // 晋升进 change 目录（及 openspec/artifacts/）并写 pev-log.md。任一工件晋升
     // 结果不是 promoted（unverified/missing/conflict）即拒绝归档——未验证内容
@@ -1683,6 +1717,7 @@ export class ArchiveCommand {
         roundName: pevRound,
         schema,
         artifactsRoot: path.join(root.path, 'openspec', 'artifacts'),
+        skippedArtifactIds: workflowSkippedIds,
       });
       if (promotions.length > 0) {
         await writePevLog(changeDir, promotions);

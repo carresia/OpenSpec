@@ -62,6 +62,8 @@ export async function promotePevArtifacts(input: {
   roundName?: string;
   schema: SchemaYaml;
   artifactsRoot: string;
+  /** Workflow-state skipped artifact IDs: promoted never, not even as unverified. */
+  skippedArtifactIds?: ReadonlySet<string>;
 }): Promise<PromotionResult[]> {
   const results: PromotionResult[] = [];
   const { changeDir, projectRoot, roundName, schema, artifactsRoot } = input;
@@ -70,6 +72,9 @@ export async function promotePevArtifacts(input: {
 
   for (const artifact of schema.artifacts) {
     if (!artifact.pev) continue;
+    // A workflow-skipped stage produces nothing under .pev/ by contract, so
+    // it must not surface as unverified, be copied, or reach pev-log.md.
+    if (input.skippedArtifactIds?.has(artifact.id)) continue;
     const source = path.join(roundDir, artifact.pev.output);
     const state = readPevState(roundDir, artifact.pev.runDir);
     const base = {

@@ -313,4 +313,49 @@ artifacts:
       expect(graph.getBlocked(new Set())).toEqual({ last: ['second', 'first'] });
     });
   });
+
+  // Workflow-state skipped awareness: the optional `skipped` set models stages
+  // the change skipped via .openspec-workflow.json. The red line is that a
+  // skipped artifact is never added to `completed` — the parameter alone makes
+  // skipped dependencies count as satisfied and skipped artifacts count as
+  // outside the plan. Without the parameter every method must behave exactly
+  // as before (regression anchor for "no state file = today's behavior").
+  describe('workflow skipped awareness', () => {
+    const schema = createSchema([
+      { id: 'A', generates: 'a.md', description: 'A', template: 't.md', requires: [] },
+      { id: 'B', generates: 'b.md', description: 'B', template: 't.md', requires: ['A'] },
+      { id: 'C', generates: 'c.md', description: 'C', template: 't.md', requires: ['A', 'B'] },
+    ]);
+    const graph = ArtifactGraph.fromSchema(schema);
+
+    it('treats a skipped dependency as satisfied: dependents become ready', () => {
+      // Only A completed; B skipped; C requires A and B → C is ready.
+      expect(graph.getNextArtifacts(new Set(['A']), new Set(['B']))).toEqual(['C']);
+    });
+
+    it('never lists a skipped artifact itself as ready', () => {
+      expect(graph.getNextArtifacts(new Set(), new Set(['B']))).not.toContain('B');
+    });
+
+    it('omits skipped dependencies from getBlocked missingDeps', () => {
+      // A completed, B skipped: C has no unmet dependency left.
+      expect(graph.getBlocked(new Set(['A']), new Set(['B']))).toEqual({});
+      // Without the skipped set, B is still a real blocker (today's behavior).
+      expect(graph.getBlocked(new Set(['A']))).toEqual({ C: ['B'] });
+    });
+
+    it('judges isComplete over non-skipped artifacts only', () => {
+      // B skipped: A and C completed means the plan is complete.
+      expect(graph.isComplete(new Set(['A', 'C']), new Set(['B']))).toBe(true);
+      // Same completed set without the skipped set is incomplete: B is missing.
+      expect(graph.isComplete(new Set(['A', 'C']))).toBe(false);
+    });
+
+    it('keeps byte-identical behavior when no skipped set is passed', () => {
+      const completed = new Set(['A']);
+      expect(graph.getNextArtifacts(completed)).toEqual(['B']);
+      expect(graph.getBlocked(completed)).toEqual({ C: ['B'] });
+      expect(graph.isComplete(completed)).toBe(false);
+    });
+  });
 });

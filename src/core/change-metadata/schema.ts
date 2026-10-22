@@ -60,7 +60,8 @@ export const ChangeMetadataSchema = z.object({
   // tree - only from git - so it is the author's call, not an inference from the
   // shape of a delta.
   retire_capabilities: z.boolean().optional(),
-  // PEV 轮次目录名（如 "prd-2026-10-01"）。当 schema 含 pev 后端 artifact 时，
+  // PEV 轮次目录名（如 "round-2026-10-17"；2026-10-21 前创建的轮次为 "prd-<日期>"，
+  // 对引擎是不透明元数据，不受命名变更影响）。当 schema 含 pev 后端 artifact 时，
   // 创建 change 会同时创建 `.pev/<pev_round>/` 并把该值写入这里，供完成判定与
   // 归档晋升定位 `.pev/` 过程工作区。
   pev_round: z.string().min(1).optional(),

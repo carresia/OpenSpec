@@ -1,5 +1,5 @@
 import { z, ZodError } from 'zod';
-import { readFileSync, promises as fs } from 'fs';
+import { readFileSync, existsSync, promises as fs } from 'fs';
 import path from 'path';
 import { SpecSchema, ChangeSchema, Spec, Change } from '../schemas/index.js';
 import { MarkdownParser } from '../parsers/markdown-parser.js';
@@ -44,6 +44,8 @@ import { findTaskNumberingIssues } from './task-numbering.js';
 import { findMissingTaskCheckboxIssues } from './task-checkboxes.js';
 import { findPurposePlaceholderIssue } from './purpose-placeholder.js';
 import { getPackageSchemasDir, getSchemaDir } from '../artifact-graph/index.js';
+import { isSpecsArtifactPath } from '../artifact-graph/outputs.js';
+import { readWorkflowState, WORKFLOW_STATE_FILENAME } from '../workflow-state/index.js';
 
 export class Validator {
   private strictMode: boolean;
@@ -177,20 +179,64 @@ export class Validator {
     const missingHeaderSpecs: string[] = [];
     const emptySectionSpecs: Array<{ path: string; sections: string[] }> = [];
 
+    // Workflow-state gate (pev-dynamic-workflow): a change declaring
+    // .openspec-workflow.json must carry a valid state on every lifecycle
+    // entry point. A structural failure is an ERROR in strict AND non-strict
+    // mode - validate never falls back to stateless behavior on a broken
+    // state. A valid state's skipped set then exempts stages from the PEV
+    // provenance gate below (skipped stages produce nothing to verify).
+    let workflowSkippedIds: Set<string> | undefined;
+    // True when a valid state skips every specs-producing artifact: the change
+    // legally has zero deltas (skipped stages produce nothing), so the
+    // no-delta gate below must treat it like a declared skip_specs marker
+    // instead of demanding the legacy marker or delta files.
+    let workflowSkipsSpecs = false;
+    const projectRoot = options.projectRoot ?? path.resolve(changeDir, '..', '..', '..');
+    const workflowStatePath = path.join(changeDir, WORKFLOW_STATE_FILENAME);
+    if (existsSync(workflowStatePath)) {
+      try {
+        const schemaName = resolveSchemaForChange(changeDir, undefined, projectRoot);
+        const wfSchema = resolveSchema(schemaName, projectRoot);
+        const wf = readWorkflowState(changeDir, wfSchema);
+        if (wf.status === 'error') {
+          issues.push({
+            level: 'ERROR',
+            path: WORKFLOW_STATE_FILENAME,
+            message: `Invalid workflow state: ${wf.issues.join('; ')}`,
+          });
+        } else if (wf.status === 'ok') {
+          workflowSkippedIds = new Set(wf.skipped.keys());
+          const specStages = wfSchema.artifacts.filter((a) => isSpecsArtifactPath(a.generates));
+          workflowSkipsSpecs =
+            specStages.length > 0 && specStages.every((a) => workflowSkippedIds!.has(a.id));
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        issues.push({
+          level: 'ERROR',
+          path: WORKFLOW_STATE_FILENAME,
+          message: `Workflow state cannot be validated: ${message}`,
+        });
+      }
+    }
+
     // PEV provenance gate (pev-verification-gates): a PEV-bound artifact only
     // counts once its skill's state machine reached COMPLETE. Hand-written
     // files in the change directory or a bare output/ never flip the verdict.
     // Strict mode treats an unverified artifact as an error; the default run
     // keeps it a warning so the structural verdict is unchanged.
     try {
-      // changeDir is <root>/openspec/changes/<name>: three levels up to root.
-      const projectRoot = options.projectRoot ?? path.resolve(changeDir, '..', '..', '..');
+      // changeDir is <root>/openspec/changes/<name>: three levels up to root
+      // (projectRoot resolved once above the workflow-state gate).
       const changeMetadata = readChangeMetadata(changeDir, projectRoot);
       if (changeMetadata?.pev_round) {
         const schema = resolveSchema(changeMetadata.schema, projectRoot);
         const roundDir = resolveRoundDir(projectRoot, changeMetadata.pev_round);
         for (const artifact of schema.artifacts) {
           if (!artifact.pev) continue;
+          // Workflow-skipped stages are exempt: they never run, so there is
+          // no state.json to demand and no output to verify.
+          if (workflowSkippedIds?.has(artifact.id)) continue;
           if (isPevStageComplete(roundDir, artifact.pev.runDir, artifact.pev.output)) continue;
           issues.push({
             level: this.strictMode ? 'ERROR' : 'WARNING',
@@ -544,7 +590,7 @@ export class Validator {
     // historical path degraded to "no deltas".
     const skipSpecs = marker.declared;
     let specsDirHasFiles = false;
-    if (skipSpecs) {
+    if (skipSpecs || workflowSkipsSpecs) {
       try {
         specsDirHasFiles = await hasAnyFileUnder(specsDir);
       } catch {
@@ -554,14 +600,34 @@ export class Validator {
     if (skipSpecs && specsDirHasFiles) {
       issues.push({ level: 'ERROR', path: 'file', message: VALIDATION_MESSAGES.CHANGE_SKIP_SPECS_CONFLICT });
     }
+    // Same zero-output contract for workflow skips: a state that skips every
+    // specs stage contradicts any file under specs/ (零产出), and accepting
+    // the files would let the skipped stage's output leak in through validate.
+    if (workflowSkipsSpecs && specsDirHasFiles) {
+      issues.push({
+        level: 'ERROR',
+        path: WORKFLOW_STATE_FILENAME,
+        message:
+          `Workflow state skips every specs stage, but files exist under specs/. ` +
+          `A skipped stage must produce no output: remove the files, or re-activate the stage in ${WORKFLOW_STATE_FILENAME}.`,
+      });
+    }
 
     // The root-level and unread-file errors already name the file and the fix;
     // adding "No deltas found" on top would contradict them, since the deltas
-    // are sitting in the files just reported.
+    // are sitting in the files just reported. A workflow-skipped specs stage
+    // makes zero deltas the expected shape, so it is accepted like a declared
+    // skip_specs marker (without demanding the legacy mechanism).
     if (totalDeltas === 0 && !hasRootLevelSpec && unreadDeltaFiles.length === 0) {
       if (skipSpecs && !specsDirHasFiles) {
         issues.push({ level: 'INFO', path: 'file', message: VALIDATION_MESSAGES.CHANGE_SKIP_SPECS_ACCEPTED });
-      } else if (!skipSpecs) {
+      } else if (workflowSkipsSpecs && !specsDirHasFiles) {
+        issues.push({
+          level: 'INFO',
+          path: WORKFLOW_STATE_FILENAME,
+          message: 'Workflow state skips the specs stage(s): no delta specs expected.',
+        });
+      } else if (!skipSpecs && !workflowSkipsSpecs) {
         issues.push({ level: 'ERROR', path: 'file', message: this.enrichTopLevelError('change', VALIDATION_MESSAGES.CHANGE_NO_DELTAS) });
       }
     }

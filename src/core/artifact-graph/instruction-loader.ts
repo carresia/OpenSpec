@@ -27,6 +27,12 @@ import { readProjectConfig, validateConfigRules, type ProjectConfig } from '../p
 import type { ReferenceIndexEntry } from '../references.js';
 import type { PlanningHome } from '../planning-home.js';
 import type { ChangeMetadata } from '../change-metadata/index.js';
+import {
+  loadWorkflowState,
+  type WorkflowSkipEntry,
+  type WorkflowStateOk,
+  type WorkflowUpgradeEvent,
+} from '../workflow-state/index.js';
 import type { Artifact, CompletedSet } from './types.js';
 
 // Session-level cache for validation warnings (avoid repeating same warnings)
@@ -73,6 +79,13 @@ export interface ChangeContext {
    * render them as skipped rather than done.
    */
   skippedArtifacts?: Set<string>;
+  /**
+   * Loaded workflow state (.openspec-workflow.json) when the change declares
+   * one. Workflow-skipped artifacts stay OUT of `completed` (the red line):
+   * consumers must treat them as outside the plan, not as done. Kept separate
+   * from `skippedArtifacts`, which is the legacy skip_specs mechanism.
+   */
+  workflow?: WorkflowStateOk;
 }
 
 export interface LoadChangeContextOptions {
@@ -157,8 +170,12 @@ export interface DependencyInfo {
   path: string;
   /** Description of the dependency artifact */
   description: string;
-  /** True when the dependency is satisfied via skip_specs - no files exist to read */
+  /** True when the dependency is satisfied via skip_specs or workflow state - no files to read */
   skipped?: boolean;
+  /** Present when skipped: which mechanism skipped it. */
+  skippedBy?: 'workflow' | 'skip_specs';
+  /** Present when skipped by workflow state: the recorded skip reason. */
+  skipReason?: string;
 }
 
 /**
@@ -169,7 +186,7 @@ export interface ArtifactStatus {
   id: string;
   /** Output path pattern */
   outputPath: string;
-  /** Status: done, skipped (via skip_specs), ready, or blocked */
+  /** Status: done, skipped (via skip_specs or workflow state), ready, or blocked */
   status: 'done' | 'skipped' | 'ready' | 'blocked';
   /** Artifact IDs this artifact directly requires (its `requires` edges).
    * Present for every status so callers can compute the transitive required
@@ -178,6 +195,15 @@ export interface ArtifactStatus {
   requires: string[];
   /** Missing dependencies (only for blocked) */
   missingDeps?: string[];
+  /** Present when status is skipped: which mechanism skipped it. */
+  skippedBy?: 'workflow' | 'skip_specs';
+}
+
+/** Workflow-state summary carried on the status surface (text and JSON). */
+export interface WorkflowStatusSummary {
+  active: string[];
+  skipped: Array<{ id: string; reason: string; decidedBy: string; evidence: string[] }>;
+  upgrades: WorkflowUpgradeEvent[];
 }
 
 /**
@@ -207,6 +233,8 @@ export interface ChangeStatus {
   applyRequires: string[];
   /** Status of each artifact */
   artifacts: ArtifactStatus[];
+  /** Workflow-state summary, present only when the change declares a state */
+  workflow?: WorkflowStatusSummary;
   /** Non-fatal metadata diagnostics */
   warnings?: string[];
 }
@@ -307,20 +335,45 @@ export function loadChangeContext(
 
   const schema = resolveSchema(resolvedSchemaName, projectRoot);
   const graph = ArtifactGraph.fromSchema(schema);
+
+  // Workflow state loads right after the schema resolves: a corrupt state file
+  // fails every lifecycle entry point here (thrown WorkflowStateError → exit
+  // 1), never a silent fallback to stateless behavior. Absent file → undefined
+  // and the change keeps today's behavior.
+  const workflow = loadWorkflowState(changeDir, schema);
+
   const completed = detectCompleted(graph, changeDir, {
     roundDir: metadata?.pev_round
       ? path.join(projectRoot, '.pev', metadata.pev_round)
       : undefined,
   });
 
+  // Red line: a workflow-skipped artifact never counts as completed, even when
+  // its output file (or a hand-written state.json) exists. detectCompleted
+  // judged by files alone, so the skip removes it here rather than downstream.
+  // The reverse is also forbidden — skip must not satisfy dependencies via the
+  // completed set; consumers pass `workflow.skipped` to the graph methods.
+  if (workflow) {
+    for (const id of workflow.skipped.keys()) {
+      completed.delete(id);
+    }
+  }
+
   // A change that declares skip_specs has no spec deltas by design, so
   // artifacts generating into specs/ count as complete; otherwise the graph
   // would block their dependents (e.g. tasks) on files that must not exist.
   // Tracked separately so status renders them as skipped, not done.
+  // Workflow-skipped artifacts are excluded: the red line forbids their IDs
+  // entering `completed` by any path, and the workflow skip already satisfies
+  // dependents through the graph's skipped set.
   const skippedArtifacts = new Set<string>();
   if (metadata?.skip_specs) {
     for (const artifact of graph.getAllArtifacts()) {
-      if (isSpecsArtifactPath(artifact.generates) && !completed.has(artifact.id)) {
+      if (
+        isSpecsArtifactPath(artifact.generates) &&
+        !completed.has(artifact.id) &&
+        !workflow?.skipped.has(artifact.id)
+      ) {
         completed.add(artifact.id);
         skippedArtifacts.add(artifact.id);
       }
@@ -338,6 +391,7 @@ export function loadChangeContext(
     ...(metadata ? { metadata } : {}),
     ...(warnings.length > 0 ? { warnings } : {}),
     ...(skippedArtifacts.size > 0 ? { skippedArtifacts } : {}),
+    ...(workflow ? { workflow } : {}),
   };
 }
 
@@ -373,8 +427,28 @@ export function generateInstructions(
     throw new Error(`Artifact '${artifactId}' not found in schema '${context.schemaName}'`);
   }
 
+  // A workflow-skipped artifact gets no instructions, not even a partial set:
+  // the change explicitly decided this stage produces nothing here, so the
+  // refusal carries the decision record (reason, decider) instead.
+  const workflowSkip = context.workflow?.skipped.get(artifactId);
+  if (workflowSkip) {
+    throw new Error(
+      `Artifact '${artifactId}' is skipped by this change's workflow state (.openspec-workflow.json):\n` +
+        `  reason: ${workflowSkip.reason}\n` +
+        `  decided by: ${workflowSkip.decidedBy}\n` +
+        `Skipped stages produce nothing; their inputs are provided outside the engine. ` +
+        `To run this stage anyway, revise the workflow state (via a confirmed upgrade, or by editing it before work starts).`
+    );
+  }
+
   const templateContent = loadTemplate(context.schemaName, artifact.template, context.projectRoot);
-  const dependencies = getDependencyInfo(artifact, context.graph, context.completed, context.skippedArtifacts);
+  const dependencies = getDependencyInfo(
+    artifact,
+    context.graph,
+    context.completed,
+    context.skippedArtifacts,
+    context.workflow?.skipped
+  );
   const unlocks = getUnlockedArtifacts(context.graph, artifactId);
 
   // Use projectRoot from context if not explicitly provided
@@ -426,13 +500,18 @@ export function generateInstructions(
           runDir: artifact.pev.runDir,
           output: artifact.pev.output,
           roundDir: path.join(context.projectRoot, '.pev', roundName),
-          upstream: artifact.requires.map((id) => {
-            const dep = context.graph.getArtifact(id);
-            const source = dep?.pev?.output
-              ? path.join(context.projectRoot, '.pev', roundName, dep.pev.output)
-              : (dep?.generates ?? id);
-            return { artifactId: id, source };
-          }),
+          // Workflow-skipped dependencies are omitted: they produce no output
+          // under .pev/, so naming them would point at files that never exist.
+          // Their substitute inputs live outside the engine.
+          upstream: artifact.requires
+            .filter((id) => !context.workflow?.skipped.has(id))
+            .map((id) => {
+              const dep = context.graph.getArtifact(id);
+              const source = dep?.pev?.output
+                ? path.join(context.projectRoot, '.pev', roundName, dep.pev.output)
+                : (dep?.generates ?? id);
+              return { artifactId: id, source };
+            }),
         }
       : undefined;
 
@@ -475,7 +554,8 @@ function getDependencyInfo(
   artifact: Artifact,
   graph: ArtifactGraph,
   completed: CompletedSet,
-  skippedArtifacts?: Set<string>
+  skippedArtifacts?: Set<string>,
+  workflowSkipped?: ReadonlyMap<string, WorkflowSkipEntry>
 ): DependencyInfo[] {
   return artifact.requires.map(id => {
     const depArtifact = graph.getArtifact(id);
@@ -484,7 +564,12 @@ function getDependencyInfo(
       done: completed.has(id),
       path: depArtifact?.generates ?? id,
       description: depArtifact?.description ?? '',
-      ...(skippedArtifacts?.has(id) ? { skipped: true } : {}),
+      ...(skippedArtifacts?.has(id)
+        ? { skipped: true, skippedBy: 'skip_specs' as const }
+        : {}),
+      ...(workflowSkipped?.has(id)
+        ? { skipped: true, skippedBy: 'workflow' as const, skipReason: workflowSkipped.get(id)?.reason }
+        : {}),
     };
   });
 }
@@ -520,11 +605,21 @@ export function formatChangeStatus(
 ): ChangeStatus {
   // Load schema to get apply phase configuration
   const schema = resolveSchema(context.schemaName, context.projectRoot);
-  const applyRequires = schema.apply?.requires ?? schema.artifacts.map(a => a.id);
+  // Apply's required set counts active artifacts only: a workflow-skipped
+  // stage must appear neither as required nor as satisfied-by-skip.
+  const applyRequires = (schema.apply?.requires ?? schema.artifacts.map(a => a.id)).filter(
+    id => !context.workflow?.skipped.has(id)
+  );
+
+  // Workflow skips ride along as the graph's skipped set; without a state file
+  // every call below sees undefined and behaves exactly as before.
+  const workflowSkipped = context.workflow
+    ? new Set(context.workflow.skipped.keys())
+    : undefined;
 
   const artifacts = context.graph.getAllArtifacts();
-  const ready = new Set(context.graph.getNextArtifacts(context.completed));
-  const blocked = context.graph.getBlocked(context.completed);
+  const ready = new Set(context.graph.getNextArtifacts(context.completed, workflowSkipped));
+  const blocked = context.graph.getBlocked(context.completed, workflowSkipped);
 
   const artifactPaths: Record<string, ArtifactPathSummary> = {};
   const artifactStatuses: ArtifactStatus[] = artifacts.map(artifact => {
@@ -540,6 +635,17 @@ export function formatChangeStatus(
         outputPath: artifact.generates,
         status: 'skipped' as const,
         requires: artifact.requires,
+        skippedBy: 'skip_specs' as const,
+      };
+    }
+
+    if (workflowSkipped?.has(artifact.id)) {
+      return {
+        id: artifact.id,
+        outputPath: artifact.generates,
+        status: 'skipped' as const,
+        requires: artifact.requires,
+        skippedBy: 'workflow' as const,
       };
     }
 
@@ -574,8 +680,21 @@ export function formatChangeStatus(
   const buildOrder = context.graph.getBuildOrder();
   const orderMap = new Map(buildOrder.map((id, idx) => [id, idx]));
   artifactStatuses.sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
-  const isComplete = context.graph.isComplete(context.completed);
+  const isComplete = context.graph.isComplete(context.completed, workflowSkipped);
   const artifactIds = artifactStatuses.map((artifact) => artifact.id);
+
+  const workflowSummary: WorkflowStatusSummary | undefined = context.workflow
+    ? {
+        active: [...context.workflow.active],
+        skipped: [...context.workflow.skipped.entries()].map(([id, entry]) => ({
+          id,
+          reason: entry.reason,
+          decidedBy: entry.decidedBy,
+          evidence: entry.evidence,
+        })),
+        upgrades: context.workflow.state.upgrades,
+      }
+    : undefined;
 
   return {
     changeName: context.changeName,
@@ -597,6 +716,7 @@ export function formatChangeStatus(
       artifactIds,
     }),
     artifacts: artifactStatuses,
+    ...(workflowSummary ? { workflow: workflowSummary } : {}),
     ...(context.warnings ? { warnings: context.warnings } : {}),
   };
 }

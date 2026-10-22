@@ -186,10 +186,12 @@ export async function createChange(
   await FileSystemUtils.createDirectory(path.join(openspecDir, 'changes', 'archive'));
 
   // PEV 后端：为含 pev artifact 的 schema 创建 `.pev/<轮次>/` 轮次目录。轮次名
-  // 与 change 一一对应，写入元数据供完成判定与归档晋升定位过程工作区。
+  // 与 change 一一对应，写入元数据供完成判定与归档晋升定位过程工作区。轮次名
+  // 为 round-<创建日期>（W1.5 定案：不再用 prd- 前缀，也不预建 pm/ 子目录——
+  // 各 skill 的 runDir 由其首次运行自建；现存 prd-* 轮次作为不透明元数据不受影响）。
   let pevRound: string | undefined;
   if (schema.artifacts.some((artifact) => artifact.pev)) {
-    const base = `prd-${formatLocalDate()}`;
+    const base = `round-${formatLocalDate()}`;
     let candidate = base;
     let n = 2;
     while (
@@ -198,7 +200,7 @@ export async function createChange(
       candidate = `${base}-${n++}`;
     }
     pevRound = candidate;
-    await FileSystemUtils.createDirectory(path.join(projectRoot, '.pev', pevRound, 'pm'));
+    await FileSystemUtils.createDirectory(path.join(projectRoot, '.pev', pevRound));
   }
 
   const configPath = path.join(openspecDir, 'config.yaml');
