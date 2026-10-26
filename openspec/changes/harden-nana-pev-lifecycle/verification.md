@@ -172,6 +172,18 @@ R1–R16 既有行无回归：存量 106 例全部保留（2 例 `--bind` 专属
 
 未触碰：schemas 其余四件、templates 其余三件、agents 另两件、playbooks 全部（与 1.1 基线一致，可复核）。回滚：pev-skills 分支 `harden-nana-pev-lifecycle` 整体弃置（main 自 `d1d1a6d` 未动）或按任务号 `git revert` 单提交（11 个提交各自独立成任务）；schema 新增为可选字段/枚举追加，旧版脚本忽略未知字段，回滚无兼容负担。安装路径两条复核（2026-10-26 16:12）：`~/.claude/skills/product-manager` →（绝对链接）`~/skills/product-manager` → `/Users/zhengshan/project/ai/pev-skills/product-manager`；`readlink -f` 解析到位，两条路径均命中实施树。独立副本可运行：全部脚本与测试经 `SKILL_ROOT` 相对路径读取 schemas/templates，无外部目录依赖（151/151 于该树实测）。
 
+### 最终全分支评审与修复（2026-10-26 17:46–18:0x）
+
+独立评审（fable 模型子代理，对 `d1d1a6d..6097760 -- product-manager` 全量 diff，六个焦点面逐项对抗验证并实跑夹具）报告 8 项发现。按效果重定级后：**Critical×1 + Important×2 进入修复通道**（提交 `500d850`，每项先写复现测试见 RED 再修，修后 156/156）；Minor×5 记账延迟。修复内容与结果：
+
+1. **Critical（已修，RED→GREEN）**：replan 提交重跑的"登记册修复"误用转移后编号，登记 `(N+1)-artifact.json` 幻影条目 → validate R4 拒绝后续提交、轮次卡死；改为取转移条目 `from_iteration`（`find_transferred` 替代 `already_transferred`）。复现测试 `test_replan_rerun_does_not_corrupt_registry`（重跑后登记册恰 `["01-artifact.json"]` 且 validate 退出 0）。
+2. **Important（已修，RED→GREEN）**：终态冻结补位——`record_provenance` 在 COMPLETE/STOPPED/SUPERSEDED 拒绝（`E_FROZEN_STATE`）；`render` 发布形态在 STOPPED/SUPERSEDED 冻结（COMPLETE 保留重渲染修复路径，`--check`/`--prune` 诊断模式不限）。评审确认 design §1.1 表对 record_provenance 行未列冻结守卫系规格内部张力，按表后规则与 §8 的明文执行。
+3. **Important（已修，RED→GREEN）**：`commit` 透传 validate 带码 warning 时被字符串化（`rep.warn(dict)`）致 `{text, code}` 形态损坏；改为拆解透传。
+
+**延迟的 Minor（不修，留档）**：① REVISE/REPLAN 转移后重跑 `commit verification` 报阶段不匹配而非"已执行"退出 0（非破坏性、错误信息明确，且 design §2.3 的组合分支清单未含转移后场景；实施者裁决文本已同步更正——原称覆盖 REVISE/REPLAN，实际仅 BLOCKED 因 iteration 不变而命中）；② `resume --raise-limit` 重跑因"N 大于当前上限"守卫先行而拒绝（与 design §1.1 守卫列及 v1 行为一致）；③ SKILL.md 第 63 行"render+validate"与实现次序（validate→render）措辞漂移；④ 三个 STOPPED 写入方的 transitions param 形态不一（无消费方）；⑤ `init --locate` 在被选中轮 state.json 不可解析时退出 1 而非降级汇报全清单。
+
+修复触碰文件改后 SHA-256（接 4.4 表，2026-10-26 18:05 采集）：`scripts/commit.py` `2048a466257c8776`、`scripts/record_provenance.py` `5afc59105d8f2742`、`scripts/render.py` `f8a981cf3d0f8ed2`。评审焦点面结论：P1 收窄的全部消费路径（收口/转移/同号覆盖/快照守卫/validate 资格）逐一枚举无误，iteration 比对无差一；commit/transition 守卫次序干净；reopen 预算守卫写前拒绝经字节级断言。评审夹具在 `/tmp/pmreview`（评审代理无删除权限，可手工清理）。
+
 ### 任务 4.5 rc 重估通知
 
 本 change 触发 `../harden-rc-pev-closeout/` design 首节"结构性变更须重估"条款的四个变更点：① P1 语义拆分（validate.py report_tier 权威/历史分级）；② supersede 事件与 SUPERSEDED 终态（transition/commit/init/ schema）；③ 事件面合并与收口折叠（阶段推进并入 init/commit、authorized-resume 并入 resume --raise-limit、--bind/verdict/render/complete 折叠进 commit verification）；④ errors/warnings 条目可选 code 字段。新脚本 SHA-256 前 16 位清单见任务 4.4 改后列。

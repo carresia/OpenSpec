@@ -85,5 +85,5 @@
 
 并行实施的 `../harden-nana-pev-lifecycle/` 已在 product-manager 子树落地并验证(151/151)。对本 change 的两点影响:
 
-1. **design 首节重锚定**:`harden-nana-pev-lifecycle/design.md` §0 所列四个结构性变更点——P1 语义拆分(validate.py 权威/历史分级)、supersede 与 SUPERSEDED 终态、事件面合并与收口折叠(阶段推进并入 init/commit、--bind/verdict/render/complete 折叠进 commit verification)、errors/warnings 可选 code——均已生效。本 change 的实施基线(b5e5f3b)早于其最终态(`6097760`);若本 change design 首节锚定过 PM 七脚本哈希,合入前须按其 verification.md 任务 4.4 的改后 SHA 列重锚定复核。本 change 未消费 PM 侧任何接口(仅跨技能只读 `pm/output/prd.md`,协议未变),重估预期为纯锚定更新。
+1. **design 首节重锚定**:`harden-nana-pev-lifecycle/design.md` §0 所列四个结构性变更点——P1 语义拆分(validate.py 权威/历史分级)、supersede 与 SUPERSEDED 终态、事件面合并与收口折叠(阶段推进并入 init/commit、--bind/verdict/render/complete 折叠进 commit verification)、errors/warnings 可选 code——均已生效。本 change 的实施基线(b5e5f3b)早于其最终态(评审修复后 `500d850`);若本 change design 首节锚定过 PM 七脚本哈希,合入前须按其 verification.md 任务 4.4 改后 SHA 列+最终评审节补列(commit/record_provenance/render 三件)重锚定复核。本 change 未消费 PM 侧任何接口(仅跨技能只读 `pm/output/prd.md`,协议未变),重估预期为纯锚定更新。
 2. **分支拓扑**:两 change 的提交在 pev-skills 同一支链上交织(本 change 三提交在中间,`b5e5f3b → 09adb89 → 6edfe06 → 69b77b8 → 4c43549 → … → 6097760`),无法拆分为互不包含的分支;两侧测试(50/50 与 151/151)均在包含双方的树上通过。
